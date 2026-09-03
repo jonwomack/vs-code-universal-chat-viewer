@@ -9,13 +9,13 @@
   "preview": true,
   "repository": {
     "type": "git",
-    "url": "https://github.com/jonwomack/universal-chat-viewer.git"
+    "url": "https://github.com/jonwomack/vs-code-universal-chat-viewer.git"
   },
-  "homepage": "https://github.com/jonwomack/universal-chat-viewer#readme",
+  "homepage": "https://github.com/jonwomack/vs-code-universal-chat-viewer#readme",
   "bugs": {
-    "url": "https://github.com/jonwomack/universal-chat-viewer/issues"
+    "url": "https://github.com/jonwomack/vs-code-universal-chat-viewer/issues"
   },
-  "qna": "https://github.com/jonwomack/universal-chat-viewer/discussions",
+  "qna": "https://github.com/jonwomack/vs-code-universal-chat-viewer/discussions",
   "engines": {
     "vscode": "^1.100.0"
   },
