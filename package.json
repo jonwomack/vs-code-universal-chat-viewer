@@ -1,0 +1,115 @@
+{
+  "name": "universal-chat-viewer",
+  "displayName": "Universal Chat Viewer",
+  "description": "Browse and continue local VS Code chat sessions across every workspace.",
+  "version": "0.2.0",
+  "publisher": "jonwomack",
+  "license": "MIT",
+  "icon": "media/marketplace-icon.png",
+  "preview": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jonwomack/universal-chat-viewer.git"
+  },
+  "homepage": "https://github.com/jonwomack/universal-chat-viewer#readme",
+  "bugs": {
+    "url": "https://github.com/jonwomack/universal-chat-viewer/issues"
+  },
+  "qna": "https://github.com/jonwomack/universal-chat-viewer/discussions",
+  "engines": {
+    "vscode": "^1.100.0"
+  },
+  "extensionKind": [
+    "ui"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": true
+    },
+    "virtualWorkspaces": true
+  },
+  "categories": [
+    "Other"
+  ],
+  "keywords": [
+    "chat",
+    "copilot",
+    "history",
+    "search",
+    "workspace",
+    "conversation"
+  ],
+  "activationEvents": [
+    "onView:universalChatViewer.sessions",
+    "onCommand:universalChatViewer.open",
+    "onStartupFinished"
+  ],
+  "main": "./extension.js",
+  "contributes": {
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "universalChatViewer",
+          "title": "Universal Chats",
+          "icon": "$(comment-discussion)"
+        }
+      ]
+    },
+    "views": {
+      "universalChatViewer": [
+        {
+          "id": "universalChatViewer.sessions",
+          "name": "All Chats",
+          "type": "webview"
+        }
+      ]
+    },
+    "commands": [
+      {
+        "command": "universalChatViewer.open",
+        "title": "Universal Chats: Open Viewer",
+        "icon": "$(comment-discussion)"
+      },
+      {
+        "command": "universalChatViewer.refresh",
+        "title": "Universal Chats: Refresh",
+        "icon": "$(refresh)"
+      }
+    ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "universalChatViewer.refresh",
+          "when": "view == universalChatViewer.sessions",
+          "group": "navigation"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Universal Chat Viewer",
+      "properties": {
+        "universalChatViewer.additionalStorageRoots": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "description": "Additional workspaceStorage folders to scan."
+        },
+        "universalChatViewer.openWorkspaceInNewWindow": {
+          "type": "boolean",
+          "default": false,
+          "description": "Open a chat's original workspace in a new window before continuing it."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "test": "node --test test/*.test.js",
+    "package": "vsce package",
+    "publish": "vsce publish"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.6.0"
+  }
+}
