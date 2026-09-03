@@ -1,6 +1,15 @@
 # Changelog
 
-All notable changes to Universal Chat Viewer are documented here.
+All notable changes to Cross-Workspace Chat Viewer are documented here.
+
+## 0.2.1 - 2026-09-02
+
+### Changed
+
+- Renamed the user-facing extension to Cross-Workspace Chat Viewer.
+- Renamed the Activity Bar container to Workspace Chats.
+- Renamed the sidebar view to All Chat Sessions.
+- Clarified the Marketplace description around cross-workspace chat navigation.
 
 ## 0.2.0 - 2026-09-02
 

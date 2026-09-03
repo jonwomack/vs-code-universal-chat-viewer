@@ -1,6 +1,6 @@
 # Privacy
 
-Universal Chat Viewer is designed to operate entirely on your local machine.
+Cross-Workspace Chat Viewer is designed to operate entirely on your local machine.
 
 ## Data accessed
 
@@ -24,7 +24,7 @@ When continuing a chat across VS Code Stable and Insiders, the extension writes 
 
 ## Network access
 
-Universal Chat Viewer does not make network requests. VS Code, GitHub Copilot, installed extensions, and opened workspaces may independently use network services according to their own settings and policies.
+Cross-Workspace Chat Viewer does not make network requests. VS Code, GitHub Copilot, installed extensions, and opened workspaces may independently use network services according to their own settings and policies.
 
 ## Reporting concerns
 

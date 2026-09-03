@@ -1,8 +1,8 @@
 {
   "name": "universal-chat-viewer",
-  "displayName": "Universal Chat Viewer",
-  "description": "Browse and continue local VS Code chat sessions across every workspace.",
-  "version": "0.2.0",
+  "displayName": "Cross-Workspace Chat Viewer",
+  "description": "Search, view, and continue local VS Code chats across workspaces.",
+  "version": "0.2.1",
   "publisher": "jonwomack",
   "license": "MIT",
   "icon": "media/marketplace-icon.png",
@@ -50,7 +50,7 @@
       "activitybar": [
         {
           "id": "universalChatViewer",
-          "title": "Universal Chats",
+          "title": "Workspace Chats",
           "icon": "$(comment-discussion)"
         }
       ]
@@ -59,7 +59,7 @@
       "universalChatViewer": [
         {
           "id": "universalChatViewer.sessions",
-          "name": "All Chats",
+          "name": "All Chat Sessions",
           "type": "webview"
         }
       ]
@@ -67,12 +67,12 @@
     "commands": [
       {
         "command": "universalChatViewer.open",
-        "title": "Universal Chats: Open Viewer",
+        "title": "Workspace Chats: Open Viewer",
         "icon": "$(comment-discussion)"
       },
       {
         "command": "universalChatViewer.refresh",
-        "title": "Universal Chats: Refresh",
+        "title": "Workspace Chats: Refresh",
         "icon": "$(refresh)"
       }
     ],
@@ -86,7 +86,7 @@
       ]
     },
     "configuration": {
-      "title": "Universal Chat Viewer",
+      "title": "Cross-Workspace Chat Viewer",
       "properties": {
         "universalChatViewer.additionalStorageRoots": {
           "type": "array",

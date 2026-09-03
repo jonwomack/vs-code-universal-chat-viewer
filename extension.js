@@ -96,7 +96,7 @@ class ChatViewerProvider {
 
   showActionError(error) {
     this.output.appendLine(`Action failed: ${error.stack || error.message}`);
-    vscode.window.showErrorMessage(`Universal Chat Viewer: ${error.message}`);
+    vscode.window.showErrorMessage(`Cross-Workspace Chat Viewer: ${error.message}`);
   }
 }
 
@@ -255,7 +255,7 @@ async function continueInOtherProduct(session, target) {
   }
 
   vscode.window.showInformationMessage(
-    `Opening the chat in ${session.sourceLabel}. Universal Chat Viewer must be installed there too.`
+    `Opening the chat in ${session.sourceLabel}. Cross-Workspace Chat Viewer must be installed there too.`
   );
 }
 
@@ -496,7 +496,7 @@ function webviewHtml(webview) {
 }
 
 function activate(context) {
-  const output = vscode.window.createOutputChannel("Universal Chat Viewer");
+  const output = vscode.window.createOutputChannel("Cross-Workspace Chat Viewer");
   const provider = new ChatViewerProvider(context, output);
   context.subscriptions.push(
     output,
