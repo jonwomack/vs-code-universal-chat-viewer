@@ -402,6 +402,30 @@ function webviewHtml(webview) {
       return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
     }
 
+    const RELATIVE_UNITS = [
+      { unit: "year", ms: 365 * 24 * 60 * 60 * 1000 },
+      { unit: "month", ms: 30 * 24 * 60 * 60 * 1000 },
+      { unit: "week", ms: 7 * 24 * 60 * 60 * 1000 },
+      { unit: "day", ms: 24 * 60 * 60 * 1000 },
+      { unit: "hour", ms: 60 * 60 * 1000 },
+      { unit: "minute", ms: 60 * 1000 },
+    ];
+    const relativeFormatter = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" });
+
+    function formatRelativeTime(value) {
+      const diffMs = new Date(value).getTime() - Date.now();
+      const absMs = Math.abs(diffMs);
+      if (absMs < 60 * 1000) {
+        return "just now";
+      }
+      for (const { unit, ms } of RELATIVE_UNITS) {
+        if (absMs >= ms || unit === "minute") {
+          return relativeFormatter.format(Math.round(diffMs / ms), unit);
+        }
+      }
+      return "just now";
+    }
+
     function searchable(session) {
       return [session.title, session.workspaceName, session.sourceLabel, ...session.messages.flatMap(message => [message.prompt, message.response])]
         .join("\\n").toLowerCase();
@@ -503,7 +527,8 @@ function webviewHtml(webview) {
         const meta = document.createElement("div");
         meta.className = "meta";
         const workspaceStatus = session.workspaceExists ? session.workspaceName : session.workspaceName + " (missing)";
-        meta.textContent = workspaceStatus + " · " + session.sourceLabel + " · " + session.messageCount + " messages · " + formatDate(session.modifiedAt);
+        meta.textContent = workspaceStatus + " · " + session.sourceLabel + " · " + session.messageCount + " messages · " + formatRelativeTime(session.modifiedAt);
+        meta.title = formatDate(session.modifiedAt);
         card.append(title, meta);
         card.addEventListener("click", () => openSession(session.key));
         article.append(card);
@@ -522,7 +547,8 @@ function webviewHtml(webview) {
       const meta = document.createElement("div");
       meta.className = "detail-meta";
       const workspaceStatus = session.workspaceExists ? session.workspaceName : session.workspaceName + " (missing)";
-      meta.textContent = workspaceStatus + " · " + session.sourceLabel + " · " + session.messageCount + " messages · " + formatDate(session.modifiedAt);
+      meta.textContent = workspaceStatus + " · " + session.sourceLabel + " · " + session.messageCount + " messages · " + formatRelativeTime(session.modifiedAt);
+      meta.title = formatDate(session.modifiedAt);
 
       const actions = document.createElement("div");
       actions.className = "actions";

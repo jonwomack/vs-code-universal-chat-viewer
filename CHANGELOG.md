@@ -2,6 +2,12 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## 0.2.7 - 2026-09-04
+
+### Changed
+
+- Chat list and detail views now show "updated X ago" (relative time) instead of an exact date/time. Hover over it to see the exact timestamp.
+
 ## 0.2.6 - 2026-09-04
 
 ### Added
