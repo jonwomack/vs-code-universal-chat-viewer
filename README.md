@@ -58,6 +58,11 @@ npm run package
 
 Press `F5` in VS Code to run an Extension Development Host. The packaged `.vsix` can be installed with **Extensions: Install from VSIX...**.
 
+## Publishing
+
+See [PUBLISHING.md](PUBLISHING.md) for the release checklist and how CLI
+publishing authenticates without a stored Personal Access Token.
+
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md).
