@@ -4,6 +4,8 @@ Find and continue local VS Code chat sessions without remembering which workspac
 
 Cross-Workspace Chat Viewer provides one searchable sidebar for chats stored by both VS Code and VS Code Insiders. Search across workspace names, titles, prompts, and responses, then reopen the original workspace and continue the native chat session.
 
+Marketplace identifier: `jonwomack.cross-workspace-chat-viewer`
+
 ## Features
 
 - Search chats from every local workspace in one view.

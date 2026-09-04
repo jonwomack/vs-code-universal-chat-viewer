@@ -2,6 +2,13 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## 0.2.2 - 2026-09-04
+
+### Changed
+
+- Moved the Marketplace listing to the permanent identifier `jonwomack.cross-workspace-chat-viewer`.
+- The previous `jonwomack.universal-chat-viewer` identifier is superseded by this listing.
+
 ## 0.2.1 - 2026-09-02
 
 ### Changed

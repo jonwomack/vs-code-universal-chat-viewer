@@ -1,8 +1,8 @@
 {
-  "name": "universal-chat-viewer",
+  "name": "cross-workspace-chat-viewer",
   "displayName": "Cross-Workspace Chat Viewer",
   "description": "Search, view, and continue local VS Code chats across workspaces.",
-  "version": "0.2.1",
+  "version": "0.2.2",
   "publisher": "jonwomack",
   "license": "MIT",
   "icon": "media/marketplace-icon.png",
