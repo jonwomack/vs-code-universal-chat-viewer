@@ -2,6 +2,18 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## 0.2.6 - 2026-09-04
+
+### Added
+
+- The summary line now shows total on-disk size of scanned chat transcripts (e.g. "12 chats and 340 messages across all workspaces (4.2 MB)").
+
+## 0.2.5 - 2026-09-04
+
+### Changed
+
+- Removed preview status now that the full-panel chat view and auto-scroll behavior have been tested and are considered stable.
+
 ## 0.2.4 - 2026-09-04
 
 ### Changed

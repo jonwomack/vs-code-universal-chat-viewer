@@ -435,6 +435,20 @@ function webviewHtml(webview) {
       return list.reduce((sum, session) => sum + session.messageCount, 0);
     }
 
+    function totalBytes(list) {
+      return list.reduce((sum, session) => sum + (session.fileSizeBytes || 0), 0);
+    }
+
+    function formatBytes(bytes) {
+      if (bytes < 1024 * 1024) {
+        return (bytes / 1024).toFixed(1) + " KB";
+      }
+      if (bytes < 1024 * 1024 * 1024) {
+        return (bytes / (1024 * 1024)).toFixed(1) + " MB";
+      }
+      return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
+    }
+
     function openSession(key) {
       listScrollTop = window.scrollY;
       openSessionKey = key;
@@ -466,8 +480,8 @@ function webviewHtml(webview) {
       const query = search.value.trim().toLowerCase();
       const visible = sessions.filter(session => !query || searchable(session).includes(query));
       summary.textContent = visible.length === sessions.length
-        ? sessions.length + " chats and " + totalMessages(sessions) + " messages across all workspaces"
-        : visible.length + " of " + sessions.length + " chats, " + totalMessages(visible) + " of " + totalMessages(sessions) + " messages";
+        ? sessions.length + " chats and " + totalMessages(sessions) + " messages across all workspaces (" + formatBytes(totalBytes(sessions)) + ")"
+        : visible.length + " of " + sessions.length + " chats, " + totalMessages(visible) + " of " + totalMessages(sessions) + " messages (" + formatBytes(totalBytes(visible)) + " of " + formatBytes(totalBytes(sessions)) + ")";
       container.className = "card-list";
       container.replaceChildren();
 

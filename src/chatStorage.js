@@ -181,6 +181,7 @@ async function summarizeSession(data, filePath, storageDirectory, workspace, sou
     filePath,
     createdAt,
     modifiedAt: stats.mtimeMs,
+    fileSizeBytes: stats.size,
     messageCount: requests.length,
     searchableText: [
       data?.customTitle,
