@@ -355,28 +355,35 @@ function webviewHtml(webview) {
     input:focus { border-color: var(--vscode-focusBorder); }
     #summary { margin-top: 7px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
     #sessions { padding: 6px; }
-    article { margin: 5px 0; border: 1px solid var(--vscode-panel-border); border-radius: 4px; overflow: hidden; }
-    article.selected { border-color: var(--vscode-focusBorder); }
+    .back-button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; color: inherit; background: transparent; border: 1px solid var(--vscode-panel-border); border-radius: 4px; cursor: pointer; }
+    .back-button:hover { background: var(--vscode-list-hoverBackground); }
+    .card-list article { margin: 5px 0; border: 1px solid var(--vscode-panel-border); border-radius: 4px; overflow: hidden; }
     .card { width: 100%; padding: 9px; border: 0; color: inherit; background: transparent; text-align: left; cursor: pointer; }
     .card:hover { background: var(--vscode-list-hoverBackground); }
     .title { font-weight: 600; line-height: 1.3; }
     .meta { margin-top: 4px; color: var(--vscode-descriptionForeground); font-size: 0.88em; }
-    .detail { display: none; padding: 0 10px 10px; border-top: 1px solid var(--vscode-panel-border); }
-    article.selected .detail { display: block; }
-    .actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 0; }
+    .detail-view { padding: 4px 4px 24px; }
+    .detail-title { font-weight: 600; font-size: 1.05em; line-height: 1.3; }
+    .detail-meta { margin-top: 4px; margin-bottom: 6px; color: var(--vscode-descriptionForeground); font-size: 0.88em; }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 0; border-top: 1px solid var(--vscode-panel-border); border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 6px; }
     .actions button { padding: 5px 8px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 0; cursor: pointer; }
     .actions button:hover { background: var(--vscode-button-hoverBackground); }
     .actions button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
     .message { margin-top: 10px; }
     .role { margin-bottom: 4px; color: var(--vscode-descriptionForeground); font-size: 0.82em; font-weight: 600; text-transform: uppercase; }
-    .text { max-height: 260px; overflow: auto; padding: 8px; background: var(--vscode-textCodeBlock-background); white-space: pre-wrap; word-break: break-word; }
+    .text { padding: 8px; background: var(--vscode-textCodeBlock-background); white-space: pre-wrap; word-break: break-word; }
     .empty { padding: 24px 12px; color: var(--vscode-descriptionForeground); text-align: center; }
   </style>
 </head>
 <body>
   <header>
-    <input id="search" type="search" placeholder="Search every chat and workspace" aria-label="Search chats">
-    <div id="summary">Scanning chat history...</div>
+    <div id="listHeader">
+      <input id="search" type="search" placeholder="Search every chat and workspace" aria-label="Search chats">
+      <div id="summary">Scanning chat history...</div>
+    </div>
+    <div id="detailHeader" hidden>
+      <button id="back" class="back-button">&larr; All chats</button>
+    </div>
   </header>
   <main id="sessions"></main>
   <script nonce="${nonce}">
@@ -384,8 +391,12 @@ function webviewHtml(webview) {
     const search = document.getElementById("search");
     const container = document.getElementById("sessions");
     const summary = document.getElementById("summary");
+    const listHeader = document.getElementById("listHeader");
+    const detailHeader = document.getElementById("detailHeader");
+    const backButton = document.getElementById("back");
     let sessions = [];
-    let selectedId;
+    let openSessionKey;
+    let listScrollTop = 0;
 
     function formatDate(value) {
       return new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
@@ -400,8 +411,7 @@ function webviewHtml(webview) {
       const button = document.createElement("button");
       button.textContent = label;
       button.className = secondary ? "secondary" : "";
-      button.addEventListener("click", event => {
-        event.stopPropagation();
+      button.addEventListener("click", () => {
         vscode.postMessage({ type, key });
       });
       return button;
@@ -421,12 +431,44 @@ function webviewHtml(webview) {
       return block;
     }
 
+    function totalMessages(list) {
+      return list.reduce((sum, session) => sum + session.messageCount, 0);
+    }
+
+    function openSession(key) {
+      listScrollTop = window.scrollY;
+      openSessionKey = key;
+      render();
+      requestAnimationFrame(() => {
+        const lastMessage = container.querySelector(".message:last-child");
+        (lastMessage || container).scrollIntoView({ block: "end" });
+      });
+    }
+
+    function closeSession() {
+      openSessionKey = undefined;
+      render();
+      window.scrollTo(0, listScrollTop);
+    }
+
     function render() {
+      const session = sessions.find(candidate => candidate.key === openSessionKey);
+      listHeader.hidden = Boolean(session);
+      detailHeader.hidden = !session;
+      if (session) {
+        renderDetail(session);
+      } else {
+        renderList();
+      }
+    }
+
+    function renderList() {
       const query = search.value.trim().toLowerCase();
       const visible = sessions.filter(session => !query || searchable(session).includes(query));
       summary.textContent = visible.length === sessions.length
-        ? sessions.length + " chats across all workspaces"
-        : visible.length + " of " + sessions.length + " chats";
+        ? sessions.length + " chats and " + totalMessages(sessions) + " messages across all workspaces"
+        : visible.length + " of " + sessions.length + " chats, " + totalMessages(visible) + " of " + totalMessages(sessions) + " messages";
+      container.className = "card-list";
       container.replaceChildren();
 
       if (!visible.length) {
@@ -439,7 +481,6 @@ function webviewHtml(webview) {
 
       for (const session of visible) {
         const article = document.createElement("article");
-        if (selectedId === session.key) article.classList.add("selected");
         const card = document.createElement("button");
         card.className = "card";
         const title = document.createElement("div");
@@ -450,33 +491,50 @@ function webviewHtml(webview) {
         const workspaceStatus = session.workspaceExists ? session.workspaceName : session.workspaceName + " (missing)";
         meta.textContent = workspaceStatus + " · " + session.sourceLabel + " · " + session.messageCount + " messages · " + formatDate(session.modifiedAt);
         card.append(title, meta);
-        card.addEventListener("click", () => {
-          selectedId = selectedId === session.key ? undefined : session.key;
-          render();
-        });
-
-        const detail = document.createElement("div");
-        detail.className = "detail";
-        const actions = document.createElement("div");
-        actions.className = "actions";
-        if (session.workspaceExists) {
-          actions.append(action("Continue chat", "continue", session.key));
-        }
-        if (session.workspaceExists && (session.workspaceUri || session.workspacePath)) {
-          actions.append(action("Open workspace", "openWorkspace", session.key, true));
-        }
-        actions.append(action("Raw transcript", "openRaw", session.key, true));
-        detail.append(actions);
-        for (const message of session.messages) {
-          const prompt = renderMessage("You", message.prompt);
-          const response = renderMessage("Assistant", message.response);
-          if (prompt) detail.append(prompt);
-          if (response) detail.append(response);
-        }
-        article.append(card, detail);
+        card.addEventListener("click", () => openSession(session.key));
+        article.append(card);
         container.append(article);
       }
     }
+
+    function renderDetail(session) {
+      container.className = "detail-view";
+      container.replaceChildren();
+
+      const title = document.createElement("div");
+      title.className = "detail-title";
+      title.textContent = session.title;
+
+      const meta = document.createElement("div");
+      meta.className = "detail-meta";
+      const workspaceStatus = session.workspaceExists ? session.workspaceName : session.workspaceName + " (missing)";
+      meta.textContent = workspaceStatus + " · " + session.sourceLabel + " · " + session.messageCount + " messages · " + formatDate(session.modifiedAt);
+
+      const actions = document.createElement("div");
+      actions.className = "actions";
+      if (session.workspaceExists) {
+        actions.append(action("Continue chat", "continue", session.key));
+      }
+      if (session.workspaceExists && (session.workspaceUri || session.workspacePath)) {
+        actions.append(action("Open workspace", "openWorkspace", session.key, true));
+      }
+      actions.append(action("Raw transcript", "openRaw", session.key, true));
+
+      container.append(title, meta, actions);
+      for (const message of session.messages) {
+        const prompt = renderMessage("You", message.prompt);
+        const response = renderMessage("Assistant", message.response);
+        if (prompt) container.append(prompt);
+        if (response) container.append(response);
+      }
+    }
+
+    backButton.addEventListener("click", closeSession);
+    document.addEventListener("keydown", event => {
+      if (event.key === "Escape" && openSessionKey) {
+        closeSession();
+      }
+    });
 
     search.addEventListener("input", render);
     window.addEventListener("message", event => {

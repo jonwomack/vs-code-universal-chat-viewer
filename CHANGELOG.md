@@ -2,6 +2,20 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## 0.2.4 - 2026-09-04
+
+### Changed
+
+- Clicking a chat now opens it full-panel (replacing the list) with a back button, matching the built-in chat view instead of expanding inline in the list.
+
+## 0.2.3 - 2026-09-04
+
+### Changed
+
+- Opening a chat now scrolls straight to its most recent message instead of starting at the top.
+- The summary line now shows total message counts alongside chat counts (e.g. "12 chats and 340 messages across all workspaces").
+- Removed the inner scrollbar on long messages so the panel has a single, page-level scroll instead of nested scroll regions.
+
 ## 0.2.2 - 2026-09-04
 
 ### Changed
