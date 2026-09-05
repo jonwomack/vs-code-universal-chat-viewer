@@ -354,6 +354,9 @@ function webviewHtml(webview) {
     input { width: 100%; padding: 7px 9px; color: var(--vscode-input-foreground); background: var(--vscode-input-background); border: 1px solid var(--vscode-input-border, transparent); outline: none; }
     input:focus { border-color: var(--vscode-focusBorder); }
     #summary { margin-top: 7px; color: var(--vscode-descriptionForeground); font-size: 0.9em; }
+    #filters { margin-top: 7px; display: flex; align-items: center; gap: 6px; font-size: 0.9em; color: var(--vscode-descriptionForeground); }
+    #filters input { width: auto; padding: 0; }
+    #filters label { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
     #sessions { padding: 6px; }
     .back-button { display: inline-flex; align-items: center; gap: 4px; padding: 5px 10px; color: inherit; background: transparent; border: 1px solid var(--vscode-panel-border); border-radius: 4px; cursor: pointer; }
     .back-button:hover { background: var(--vscode-list-hoverBackground); }
@@ -380,6 +383,9 @@ function webviewHtml(webview) {
     <div id="listHeader">
       <input id="search" type="search" placeholder="Search every chat and workspace" aria-label="Search chats">
       <div id="summary">Scanning chat history...</div>
+      <div id="filters">
+        <label><input id="showEmpty" type="checkbox"> Show empty chats (0 messages)</label>
+      </div>
     </div>
     <div id="detailHeader" hidden>
       <button id="back" class="back-button">&larr; All chats</button>
@@ -389,6 +395,7 @@ function webviewHtml(webview) {
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const search = document.getElementById("search");
+    const showEmpty = document.getElementById("showEmpty");
     const container = document.getElementById("sessions");
     const summary = document.getElementById("summary");
     const listHeader = document.getElementById("listHeader");
@@ -502,10 +509,13 @@ function webviewHtml(webview) {
 
     function renderList() {
       const query = search.value.trim().toLowerCase();
-      const visible = sessions.filter(session => !query || searchable(session).includes(query));
-      summary.textContent = visible.length === sessions.length
-        ? sessions.length + " chats and " + totalMessages(sessions) + " messages across all workspaces (" + formatBytes(totalBytes(sessions)) + ")"
-        : visible.length + " of " + sessions.length + " chats, " + totalMessages(visible) + " of " + totalMessages(sessions) + " messages (" + formatBytes(totalBytes(visible)) + " of " + formatBytes(totalBytes(sessions)) + ")";
+      const emptyCount = sessions.filter(session => session.messageCount === 0).length;
+      const base = showEmpty.checked ? sessions : sessions.filter(session => session.messageCount > 0);
+      const visible = base.filter(session => !query || searchable(session).includes(query));
+      const hiddenNote = !showEmpty.checked && emptyCount ? " (" + emptyCount + " empty chat" + (emptyCount === 1 ? "" : "s") + " hidden)" : "";
+      summary.textContent = (visible.length === base.length
+        ? base.length + " chats and " + totalMessages(base) + " messages across all workspaces (" + formatBytes(totalBytes(base)) + ")"
+        : visible.length + " of " + base.length + " chats, " + totalMessages(visible) + " of " + totalMessages(base) + " messages (" + formatBytes(totalBytes(visible)) + " of " + formatBytes(totalBytes(base)) + ")") + hiddenNote;
       container.className = "card-list";
       container.replaceChildren();
 
@@ -577,6 +587,7 @@ function webviewHtml(webview) {
     });
 
     search.addEventListener("input", render);
+    showEmpty.addEventListener("change", render);
     window.addEventListener("message", event => {
       if (event.data.type === "sessions") {
         sessions = event.data.sessions;

@@ -2,6 +2,12 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## 0.2.8 - 2026-09-04
+
+### Added
+
+- Empty chats (0 messages — panels opened but never used) are now hidden from the list by default. A new "Show empty chats" checkbox reveals them, and the summary line notes how many are hidden.
+
 ## 0.2.7 - 2026-09-04
 
 ### Changed
