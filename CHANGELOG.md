@@ -2,6 +2,12 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## 0.2.9 - 2026-09-04
+
+### Fixed
+
+- The "Continue chat", "Open workspace", and "Raw transcript" buttons now live in the sticky detail header instead of the scrolling transcript, so they stay visible after auto-scrolling to the latest message.
+
 ## 0.2.8 - 2026-09-04
 
 ### Added

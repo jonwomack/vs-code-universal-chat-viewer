@@ -368,7 +368,8 @@ function webviewHtml(webview) {
     .detail-view { padding: 4px 4px 24px; }
     .detail-title { font-weight: 600; font-size: 1.05em; line-height: 1.3; }
     .detail-meta { margin-top: 4px; margin-bottom: 6px; color: var(--vscode-descriptionForeground); font-size: 0.88em; }
-    .actions { display: flex; flex-wrap: wrap; gap: 6px; padding: 9px 0; border-top: 1px solid var(--vscode-panel-border); border-bottom: 1px solid var(--vscode-panel-border); margin-bottom: 6px; }
+    #detailHeader { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; }
     .actions button { padding: 5px 8px; color: var(--vscode-button-foreground); background: var(--vscode-button-background); border: 0; cursor: pointer; }
     .actions button:hover { background: var(--vscode-button-hoverBackground); }
     .actions button.secondary { color: var(--vscode-button-secondaryForeground); background: var(--vscode-button-secondaryBackground); }
@@ -389,6 +390,7 @@ function webviewHtml(webview) {
     </div>
     <div id="detailHeader" hidden>
       <button id="back" class="back-button">&larr; All chats</button>
+      <div id="detailActions" class="actions"></div>
     </div>
   </header>
   <main id="sessions"></main>
@@ -400,6 +402,7 @@ function webviewHtml(webview) {
     const summary = document.getElementById("summary");
     const listHeader = document.getElementById("listHeader");
     const detailHeader = document.getElementById("detailHeader");
+    const detailActions = document.getElementById("detailActions");
     const backButton = document.getElementById("back");
     let sessions = [];
     let openSessionKey;
@@ -560,17 +563,16 @@ function webviewHtml(webview) {
       meta.textContent = workspaceStatus + " · " + session.sourceLabel + " · " + session.messageCount + " messages · " + formatRelativeTime(session.modifiedAt);
       meta.title = formatDate(session.modifiedAt);
 
-      const actions = document.createElement("div");
-      actions.className = "actions";
+      detailActions.replaceChildren();
       if (session.workspaceExists) {
-        actions.append(action("Continue chat", "continue", session.key));
+        detailActions.append(action("Continue chat", "continue", session.key));
       }
       if (session.workspaceExists && (session.workspaceUri || session.workspacePath)) {
-        actions.append(action("Open workspace", "openWorkspace", session.key, true));
+        detailActions.append(action("Open workspace", "openWorkspace", session.key, true));
       }
-      actions.append(action("Raw transcript", "openRaw", session.key, true));
+      detailActions.append(action("Raw transcript", "openRaw", session.key, true));
 
-      container.append(title, meta, actions);
+      container.append(title, meta);
       for (const message of session.messages) {
         const prompt = renderMessage("You", message.prompt);
         const response = renderMessage("Assistant", message.response);
