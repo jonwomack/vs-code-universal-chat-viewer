@@ -47,7 +47,16 @@ authorized principal, not that PAT-based auth is required.
 3. Run `npm test`.
 4. `npx vsce package` to build and sanity-check the `.vsix` contents.
 5. `npx vsce publish --azure-credential`.
-6. Commit and push `package.json`/`CHANGELOG.md`/source changes to `main`.
+6. If a local `.vsix` was installed while testing, reinstall the published
+   version by Marketplace identifier so VS Code restores its gallery metadata:
+
+   ```bash
+   code-insiders --install-extension jonwomack.cross-workspace-chat-viewer@<version> --force
+   ```
+
+   Otherwise VS Code may treat the installed copy as sideloaded, omit it from
+   Marketplace-backed views, and report that no other versions are available.
+7. Commit and push `package.json`/`CHANGELOG.md`/source changes to `main`.
 
 ## Troubleshooting
 

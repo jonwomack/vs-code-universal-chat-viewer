@@ -23,5 +23,5 @@ jobs:
       - run: npm run package
       - uses: actions/upload-artifact@v7
         with:
-          name: universal-chat-viewer-vsix
+          name: cross-workspace-chat-viewer-vsix
           path: "*.vsix"

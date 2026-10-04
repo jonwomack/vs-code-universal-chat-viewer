@@ -1,8 +1,8 @@
 {
   "name": "cross-workspace-chat-viewer",
   "displayName": "Cross-Workspace Chat Viewer",
-  "description": "Search, view, and continue local VS Code chats across workspaces.",
-  "version": "0.2.9",
+  "description": "Search local VS Code and GitHub Copilot CLI chats across workspaces.",
+  "version": "0.4.20",
   "publisher": "jonwomack",
   "license": "MIT",
   "icon": "media/marketplace-icon.png",
@@ -35,12 +35,17 @@
     "copilot",
     "history",
     "search",
+    "router",
     "workspace",
     "conversation"
   ],
   "activationEvents": [
-    "onView:universalChatViewer.sessions",
-    "onCommand:universalChatViewer.open",
+    "onView:crossWorkspaceChatViewer.sessions",
+    "onCommand:crossWorkspaceChatViewer.open",
+    "onCommand:crossWorkspaceChatViewer.routePrompt",
+    "onCommand:crossWorkspaceChatViewer.configureAzureEmbeddings",
+    "onCommand:crossWorkspaceChatViewer.rebuildSemanticIndex",
+    "onCommand:crossWorkspaceChatViewer.disableSemanticRouting",
     "onStartupFinished"
   ],
   "main": "./extension.js",
@@ -48,38 +53,54 @@
     "viewsContainers": {
       "activitybar": [
         {
-          "id": "universalChatViewer",
+          "id": "crossWorkspaceChatViewer",
           "title": "Workspace Chats",
           "icon": "$(comment-discussion)"
         }
       ]
     },
     "views": {
-      "universalChatViewer": [
+      "crossWorkspaceChatViewer": [
         {
-          "id": "universalChatViewer.sessions",
-          "name": "All Chat Sessions",
+          "id": "crossWorkspaceChatViewer.sessions",
+          "name": "Chats",
           "type": "webview"
         }
       ]
     },
     "commands": [
       {
-        "command": "universalChatViewer.open",
+        "command": "crossWorkspaceChatViewer.open",
         "title": "Workspace Chats: Open Viewer",
         "icon": "$(comment-discussion)"
       },
       {
-        "command": "universalChatViewer.refresh",
+        "command": "crossWorkspaceChatViewer.refresh",
         "title": "Workspace Chats: Refresh",
         "icon": "$(refresh)"
+      },
+      {
+        "command": "crossWorkspaceChatViewer.routePrompt",
+        "title": "Workspace Chats: Route Prompt"
+      },
+      {
+        "command": "crossWorkspaceChatViewer.configureAzureEmbeddings",
+        "title": "Workspace Chats: Configure Azure Semantic Routing"
+      },
+      {
+        "command": "crossWorkspaceChatViewer.rebuildSemanticIndex",
+        "title": "Workspace Chats: Rebuild Semantic Index"
+      },
+      {
+        "command": "crossWorkspaceChatViewer.disableSemanticRouting",
+        "title": "Workspace Chats: Disable Semantic Routing and Remove Key"
       }
     ],
     "menus": {
       "view/title": [
         {
-          "command": "universalChatViewer.refresh",
-          "when": "view == universalChatViewer.sessions",
+          "command": "crossWorkspaceChatViewer.refresh",
+          "when": "view == crossWorkspaceChatViewer.sessions",
           "group": "navigation"
         }
       ]
@@ -87,7 +108,7 @@
     "configuration": {
       "title": "Cross-Workspace Chat Viewer",
       "properties": {
-        "universalChatViewer.additionalStorageRoots": {
+        "crossWorkspaceChatViewer.additionalStorageRoots": {
           "type": "array",
           "items": {
             "type": "string"
@@ -95,10 +116,57 @@
           "default": [],
           "description": "Additional workspaceStorage folders to scan."
         },
-        "universalChatViewer.openWorkspaceInNewWindow": {
+        "crossWorkspaceChatViewer.openWorkspaceInNewWindow": {
           "type": "boolean",
           "default": false,
           "description": "Open a chat's original workspace in a new window before continuing it."
+        },
+        "crossWorkspaceChatViewer.recoverMissingWorkspaces": {
+          "type": "boolean",
+          "default": true,
+          "description": "Offer to create a recovered workspace from surviving folders referenced by a chat when its original workspace is missing."
+        },
+        "crossWorkspaceChatViewer.openNewWindowWhenChatActive": {
+          "type": "boolean",
+          "default": true,
+          "description": "Open a destination workspace in a new window when replacing the current workspace could interrupt an active chat response."
+        },
+        "crossWorkspaceChatViewer.displayChatPreview": {
+          "type": "boolean",
+          "default": false,
+          "description": "Display the selected chat transcript inside the extension before or while opening its native chat."
+        },
+        "crossWorkspaceChatViewer.autoOpenChatOnSelect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Immediately continue the native chat when it is selected in the extension list. Disable this and enable chat preview to use Continue chat manually."
+        },
+        "crossWorkspaceChatViewer.routePromptsAutomatically": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically open the highest-ranked chat when routing a prompt instead of showing the ranked thread picker."
+        },
+        "crossWorkspaceChatViewer.semanticRouting.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Use a configured Azure OpenAI embedding deployment to rank chats semantically. Full transcript text is sent to that endpoint while the index is built."
+        },
+        "crossWorkspaceChatViewer.semanticRouting.azure.endpoint": {
+          "type": "string",
+          "default": "",
+          "description": "Azure OpenAI resource endpoint, such as https://your-resource.openai.azure.com."
+        },
+        "crossWorkspaceChatViewer.semanticRouting.azure.deployment": {
+          "type": "string",
+          "default": "text-embedding-3-small",
+          "description": "Azure OpenAI embedding deployment name."
+        },
+        "crossWorkspaceChatViewer.semanticRouting.dimensions": {
+          "type": "integer",
+          "minimum": 256,
+          "maximum": 1536,
+          "default": 256,
+          "description": "Embedding dimensions requested from text-embedding-3-small. Lower values reduce local index size."
         }
       }
     }

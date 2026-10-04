@@ -3,6 +3,7 @@
 const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
+const readline = require("node:readline");
 const { pathToFileURL, fileURLToPath } = require("node:url");
 
 function setAtPath(target, keys, value) {
@@ -45,32 +46,46 @@ function appendAtPath(target, keys, value) {
   return target;
 }
 
+function applyJsonLineRecord(state, record) {
+  if (record.kind === 0) {
+    return record.v;
+  }
+  if (record.kind === 1 && state !== undefined) {
+    return setAtPath(state, record.k || [], record.v);
+  }
+  if (record.kind === 2 && state !== undefined) {
+    return appendAtPath(state, record.k || [], record.v);
+  }
+  return state;
+}
+
 function parseJsonLines(text) {
   let state;
   for (const rawLine of text.split(/\r?\n/)) {
     const line = rawLine.trim();
-    if (!line) {
-      continue;
-    }
-
-    const record = JSON.parse(line);
-    if (record.kind === 0) {
-      state = record.v;
-    } else if (record.kind === 1 && state !== undefined) {
-      state = setAtPath(state, record.k || [], record.v);
-    } else if (record.kind === 2 && state !== undefined) {
-      state = appendAtPath(state, record.k || [], record.v);
+    if (line) {
+      state = applyJsonLineRecord(state, JSON.parse(line));
     }
   }
   return state;
 }
 
 async function readSessionFile(filePath) {
-  const text = await fs.promises.readFile(filePath, "utf8");
   if (filePath.endsWith(".jsonl")) {
-    return parseJsonLines(text);
+    let state;
+    const lines = readline.createInterface({
+      input: fs.createReadStream(filePath, { encoding: "utf8" }),
+      crlfDelay: Infinity
+    });
+    for await (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (line) {
+        state = applyJsonLineRecord(state, JSON.parse(line));
+      }
+    }
+    return state;
   }
-  return JSON.parse(text);
+  return JSON.parse(await fs.promises.readFile(filePath, "utf8"));
 }
 
 function uriToFsPath(value) {
@@ -108,6 +123,148 @@ function workspaceName(uri, fsPath, storageDirectory) {
   return `Orphaned (${path.basename(storageDirectory).slice(0, 8)})`;
 }
 
+function workspaceFolder(value, name, baseDirectory) {
+  if (!value || typeof value !== "string") {
+    return undefined;
+  }
+
+  const localPath = uriToFsPath(value);
+  const resolvedPath = localPath
+    ? (baseDirectory && !path.isAbsolute(localPath)
+      ? path.resolve(baseDirectory, localPath)
+      : localPath)
+    : undefined;
+  const uri = resolvedPath
+    ? pathToFileURL(resolvedPath).toString()
+    : value;
+  let defaultName;
+  if (resolvedPath) {
+    defaultName = path.basename(resolvedPath);
+  } else {
+    try {
+      defaultName = decodeURIComponent(path.posix.basename(new URL(value).pathname));
+    } catch {
+      defaultName = value;
+    }
+  }
+
+  return {
+    name: name || defaultName,
+    location: resolvedPath || value,
+    uri
+  };
+}
+
+function parseJsonWithComments(text) {
+  let withoutComments = "";
+  let inString = false;
+  let escaped = false;
+  let lineComment = false;
+  let blockComment = false;
+
+  for (let index = 0; index < text.length; index += 1) {
+    const character = text[index];
+    const next = text[index + 1];
+    if (lineComment) {
+      if (character === "\n") {
+        lineComment = false;
+        withoutComments += character;
+      }
+      continue;
+    }
+    if (blockComment) {
+      if (character === "*" && next === "/") {
+        blockComment = false;
+        index += 1;
+      } else if (character === "\n") {
+        withoutComments += character;
+      }
+      continue;
+    }
+    if (!inString && character === "/" && next === "/") {
+      lineComment = true;
+      index += 1;
+      continue;
+    }
+    if (!inString && character === "/" && next === "*") {
+      blockComment = true;
+      index += 1;
+      continue;
+    }
+
+    withoutComments += character;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === "\"") {
+        inString = false;
+      }
+    } else if (character === "\"") {
+      inString = true;
+    }
+  }
+
+  let withoutTrailingCommas = "";
+  inString = false;
+  escaped = false;
+  for (let index = 0; index < withoutComments.length; index += 1) {
+    const character = withoutComments[index];
+    if (!inString && character === ",") {
+      let nextIndex = index + 1;
+      while (/\s/.test(withoutComments[nextIndex] || "")) {
+        nextIndex += 1;
+      }
+      if (withoutComments[nextIndex] === "}" || withoutComments[nextIndex] === "]") {
+        continue;
+      }
+    }
+
+    withoutTrailingCommas += character;
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === "\"") {
+        inString = false;
+      }
+    } else if (character === "\"") {
+      inString = true;
+    }
+  }
+  return JSON.parse(withoutTrailingCommas);
+}
+
+async function readWorkspaceFolders(data, workspacePath) {
+  if (data.folder) {
+    const folder = workspaceFolder(data.folder);
+    return folder ? [folder] : [];
+  }
+  if (!data.workspace || !workspacePath) {
+    return [];
+  }
+
+  try {
+    const configuration = parseJsonWithComments(
+      await fs.promises.readFile(workspacePath, "utf8")
+    );
+    if (!Array.isArray(configuration?.folders)) {
+      return [];
+    }
+    return configuration.folders
+      .map((folder) => workspaceFolder(
+        folder?.path || folder?.uri,
+        folder?.name,
+        path.dirname(workspacePath)
+      ))
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
+}
+
 async function readWorkspace(storageDirectory) {
   const workspaceFile = path.join(storageDirectory, "workspace.json");
   try {
@@ -126,6 +283,7 @@ async function readWorkspace(storageDirectory) {
     const uri = data.folder || data.workspace;
     const fsPath = uriToFsPath(uri);
     const name = workspaceName(uri, fsPath, storageDirectory);
+    const folders = await readWorkspaceFolders(data, fsPath);
     let exists = Boolean(uri);
     if (fsPath) {
       try {
@@ -134,7 +292,7 @@ async function readWorkspace(storageDirectory) {
         exists = false;
       }
     }
-    return { name, uri, fsPath, exists };
+    return { name, uri, fsPath, exists, folders };
   } catch {
     return {
       name: `Orphaned (${path.basename(storageDirectory).slice(0, 8)})`,
@@ -155,12 +313,24 @@ function responseText(request) {
     .join("\n\n");
 }
 
-async function summarizeSession(data, filePath, storageDirectory, workspace, source) {
-  const stats = await fs.promises.stat(filePath);
+function countWords(text) {
+  if (!text) {
+    return 0;
+  }
+  let count = 0;
+  const words = /\S+/g;
+  while (words.exec(text)) {
+    count += 1;
+  }
+  return count;
+}
+
+async function summarizeSession(data, filePath, storageDirectory, workspace, source, stats) {
+  const fileStats = stats || await fs.promises.stat(filePath);
   const requests = Array.isArray(data?.requests) ? data.requests : [];
   const firstPrompt = requests.find((request) => request?.message?.text)?.message.text.trim();
   const id = data?.sessionId || path.basename(filePath, path.extname(filePath));
-  const createdAt = Number(data?.creationDate) || stats.birthtimeMs || stats.mtimeMs;
+  const createdAt = Number(data?.creationDate) || fileStats.birthtimeMs || fileStats.mtimeMs;
   const messages = requests.map((request) => ({
     prompt: request?.message?.text || "",
     response: responseText(request),
@@ -174,15 +344,19 @@ async function summarizeSession(data, filePath, storageDirectory, workspace, sou
     workspaceName: workspace.name,
     workspaceUri: workspace.uri,
     workspacePath: workspace.fsPath,
+    workspaceFolders: workspace.folders || [],
     workspaceExists: workspace.exists,
     sourceProduct: source.id,
     sourceLabel: source.label,
     storageDirectory,
     filePath,
     createdAt,
-    modifiedAt: stats.mtimeMs,
-    fileSizeBytes: stats.size,
+    modifiedAt: fileStats.mtimeMs,
+    fileSizeBytes: fileStats.size,
     messageCount: requests.length,
+    responseCount: requests.filter((request) =>
+      Array.isArray(request?.response) && request.response.length > 0
+    ).length,
     searchableText: [
       data?.customTitle,
       workspace.name,
@@ -193,14 +367,31 @@ async function summarizeSession(data, filePath, storageDirectory, workspace, sou
   };
 }
 
+function sessionWordCount(session) {
+  const counts = sessionWordCounts(session);
+  return counts.user + counts.bot;
+}
+
+function sessionWordCounts(session) {
+  return session.messages.reduce(
+    (counts, message) => {
+      counts.user += countWords(message.prompt);
+      counts.bot += countWords(message.response);
+      return counts;
+    },
+    { user: 0, bot: 0 }
+  );
+}
+
 function truncate(value, maximum) {
   const normalized = String(value).replace(/\s+/g, " ").trim();
   return normalized.length > maximum ? `${normalized.slice(0, maximum - 1)}...` : normalized;
 }
 
-async function scanStorageRoots(storageRoots) {
-  const sessions = [];
+async function discoverSessionFiles(storageRoots) {
+  const candidates = [];
   const errors = [];
+  const workspaces = [];
   const seenFiles = new Set();
 
   await Promise.all(storageRoots.map(async (root) => {
@@ -245,6 +436,15 @@ async function scanStorageRoots(storageRoots) {
     await Promise.all(directories.map(async (directory) => {
       const storageDirectory = path.join(source.path, directory.name);
       const chatsDirectory = path.join(storageDirectory, "chatSessions");
+      const workspace = await readWorkspace(storageDirectory);
+      if (workspace.uri) {
+        workspaces.push({
+          ...workspace,
+          storageDirectory,
+          sourceProduct: source.id,
+          sourceLabel: source.label
+        });
+      }
       try {
         await fs.promises.access(chatsDirectory, fs.constants.R_OK);
       } catch (error) {
@@ -254,7 +454,6 @@ async function scanStorageRoots(storageRoots) {
         return;
       }
 
-      const workspace = await readWorkspace(storageDirectory);
       let files;
       try {
         files = (await fs.promises.readdir(chatsDirectory))
@@ -272,16 +471,14 @@ async function scanStorageRoots(storageRoots) {
             return;
           }
           seenFiles.add(realPath);
-          const data = await readSessionFile(realPath);
-          if (data) {
-            sessions.push(await summarizeSession(
-              data,
-              realPath,
-              chatsDirectory,
-              workspace,
-              source
-            ));
-          }
+          const stats = await fs.promises.stat(realPath);
+          candidates.push({
+            filePath: realPath,
+            storageDirectory: chatsDirectory,
+            workspace,
+            source,
+            stats
+          });
         } catch (error) {
           errors.push(`${filePath}: ${error.message}`);
         }
@@ -289,8 +486,97 @@ async function scanStorageRoots(storageRoots) {
     }));
   }));
 
+  candidates.sort((left, right) => right.stats.mtimeMs - left.stats.mtimeMs);
+  return { candidates, workspaces, errors };
+}
+
+async function scanStorageRoots(storageRoots, options = {}) {
+  const sessions = [];
+  const { candidates, workspaces, errors } = await discoverSessionFiles(storageRoots);
+  const concurrency = Math.max(1, Math.min(options.concurrency || 4, candidates.length || 1));
+  let nextIndex = 0;
+
+  async function worker() {
+    while (nextIndex < candidates.length && options.shouldContinue?.() !== false) {
+      const candidate = candidates[nextIndex];
+      nextIndex += 1;
+      let session;
+      try {
+        const data = await readSessionFile(candidate.filePath);
+        if (!data || options.shouldContinue?.() === false) {
+          continue;
+        }
+        session = await summarizeSession(
+          data,
+          candidate.filePath,
+          candidate.storageDirectory,
+          candidate.workspace,
+          candidate.source,
+          candidate.stats
+        );
+      } catch (error) {
+        errors.push(`${candidate.filePath}: ${error.message}`);
+        continue;
+      }
+
+      sessions.push(session);
+      if (options.onSession) {
+        try {
+          await options.onSession(session);
+        } catch (error) {
+          errors.push(`Unable to report ${candidate.filePath}: ${error.message}`);
+        }
+      }
+    }
+  }
+
+  await Promise.all(Array.from({ length: concurrency }, () => worker()));
   sessions.sort((left, right) => right.modifiedAt - left.modifiedAt);
-  return { sessions, errors };
+  return { sessions, workspaces, errors };
+}
+
+async function summarizeSessionCandidate(candidate) {
+  const data = await readSessionFile(candidate.filePath);
+  if (!data) {
+    return undefined;
+  }
+
+  return summarizeSession(
+    data,
+    candidate.filePath,
+    candidate.storageDirectory,
+    candidate.workspace,
+    candidate.source,
+    candidate.stats
+  );
+}
+
+async function refreshSession(session) {
+  const stats = await fs.promises.stat(session.filePath);
+  const data = await readSessionFile(session.filePath);
+  if (!data) {
+    return undefined;
+  }
+  return {
+    session: await summarizeSession(
+      data,
+      session.filePath,
+      session.storageDirectory,
+      {
+        name: session.workspaceName,
+        uri: session.workspaceUri,
+        fsPath: session.workspacePath,
+        folders: session.workspaceFolders,
+        exists: session.workspaceExists
+      },
+      {
+        id: session.sourceProduct,
+        label: session.sourceLabel
+      },
+      stats
+    ),
+    data
+  };
 }
 
 function defaultStorageRoots(currentGlobalStoragePath, additionalRoots = [], currentProductId) {
@@ -369,8 +655,14 @@ function workspaceUri(workspace) {
 
 module.exports = {
   defaultStorageRoots,
+  discoverSessionFiles,
+  parseJsonWithComments,
   parseJsonLines,
   readSessionFile,
+  refreshSession,
   scanStorageRoots,
+  sessionWordCount,
+  sessionWordCounts,
+  summarizeSessionCandidate,
   workspaceUri
 };
