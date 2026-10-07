@@ -2,7 +2,7 @@
   "name": "cross-workspace-chat-viewer",
   "displayName": "Cross-Workspace Chat Viewer",
   "description": "Search local VS Code and GitHub Copilot CLI chats across workspaces.",
-  "version": "0.4.20",
+  "version": "0.4.21",
   "publisher": "jonwomack",
   "license": "MIT",
   "icon": "media/marketplace-icon.png",

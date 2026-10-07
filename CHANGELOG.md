@@ -2,6 +2,19 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## 0.4.21 - 2026-10-07
+
+### Fixed
+
+- GitHub Copilot CLI turns that never emit narrated assistant content (for
+  example tool-call-only turns, such as an automatic chat rename) are no
+  longer indexed and displayed as blank. Text is now recovered from
+  tool-call summaries, tool execution results, and the task-complete
+  summary when the assistant's own content is empty.
+- CLI session titles no longer get stuck on the original, often very long,
+  first-prompt text stored in `workspace.yaml`. The most recent `rename_chat`
+  title is now preferred, and any fallback title is properly truncated.
+
 ## 0.4.20 - 2026-10-03
 
 ### Added

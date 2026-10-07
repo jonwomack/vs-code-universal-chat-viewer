@@ -74,6 +74,7 @@ async function parseCopilotCliSession(sessionDirectory, stats) {
   const messages = [];
   let firstTimestamp;
   let lineNumber = 0;
+  let latestRenameTitle;
   const lines = readline.createInterface({
     input: fs.createReadStream(eventsPath, { encoding: "utf8" }),
     crlfDelay: Infinity
@@ -97,7 +98,8 @@ async function parseCopilotCliSession(sessionDirectory, stats) {
       messages.push({
         prompt: event.data.content,
         response: "",
-        timestamp: event.timestamp ? Date.parse(event.timestamp) : undefined
+        timestamp: event.timestamp ? Date.parse(event.timestamp) : undefined,
+        fallbackResponseParts: []
       });
     } else if (
       event.type === "assistant.message"
@@ -109,7 +111,51 @@ async function parseCopilotCliSession(sessionDirectory, stats) {
       message.response = [message.response, event.data.content]
         .filter(Boolean)
         .join("\n\n");
+    } else if (
+      event.type === "assistant.message"
+      && Array.isArray(event.data?.toolRequests)
+      && messages.length > 0
+    ) {
+      const message = messages.at(-1);
+      for (const toolRequest of event.data.toolRequests) {
+        const summary = toolRequest?.arguments?.summary;
+        if (typeof summary === "string" && summary.trim()) {
+          message.fallbackResponseParts.push(summary);
+        }
+        if (
+          toolRequest?.name === "rename_chat"
+          && typeof toolRequest?.arguments?.title === "string"
+          && toolRequest.arguments.title.trim()
+        ) {
+          latestRenameTitle = toolRequest.arguments.title.trim();
+        }
+      }
+    } else if (
+      event.type === "tool.execution_complete"
+      && typeof event.data?.result?.content === "string"
+      && event.data.result.content.trim()
+      && messages.length > 0
+    ) {
+      messages.at(-1).fallbackResponseParts.push(event.data.result.content);
+    } else if (
+      event.type === "session.task_complete"
+      && typeof event.data?.summary === "string"
+      && event.data.summary.trim()
+      && messages.length > 0
+    ) {
+      messages.at(-1).fallbackResponseParts.push(event.data.summary);
     }
+  }
+
+  // Some turns never emit narrated assistant content (e.g. tool-call-only
+  // turns like automatic chat renames). For those, fall back to the text
+  // surfaced via tool-call summaries, tool results, or the task-complete
+  // summary so the turn isn't indexed/displayed as blank.
+  for (const message of messages) {
+    if (!message.response.trim() && message.fallbackResponseParts.length > 0) {
+      message.response = message.fallbackResponseParts.join("\n\n");
+    }
+    delete message.fallbackResponseParts;
   }
 
   const id = metadata.id || path.basename(sessionDirectory);
@@ -117,8 +163,10 @@ async function parseCopilotCliSession(sessionDirectory, stats) {
   const workspaceExists = await pathExists(workspacePath);
   const workspaceName = workspacePath ? path.basename(workspacePath) : "No workspace";
   const createdAt = Date.parse(metadata.createdAt || "") || firstTimestamp || stats.birthtimeMs;
-  const title = metadata.name || truncate(
-    messages.find((message) => message.prompt.trim())?.prompt || "Untitled CLI chat",
+  const title = truncate(
+    latestRenameTitle || metadata.name
+      || messages.find((message) => message.prompt.trim())?.prompt
+      || "Untitled CLI chat",
     100
   );
 
