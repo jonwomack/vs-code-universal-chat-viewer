@@ -1,8 +1,7 @@
 # Privacy
 
-Cross-Workspace Chat Viewer operates locally by default. Optional semantic
-routing sends transcript chunks to an Azure OpenAI endpoint explicitly
-configured by the user.
+Cross-Workspace Chat Viewer operates locally. It does not send transcripts or
+prompts to external services.
 
 ## Data accessed
 
@@ -23,8 +22,7 @@ are not included in the viewer transcript or search index.
 
 ## Data handling
 
-- Transcript contents stay on your machine unless you explicitly enable
-  semantic routing.
+- Transcript contents stay on your machine.
 - The extension does not collect telemetry, analytics, identifiers, or usage statistics.
 - The extension never modifies or deletes original transcript files.
 - When the user explicitly selects **Import**, the extension copies that
@@ -36,21 +34,10 @@ are not included in the viewer transcript or search index.
   selected folder paths and available settings from the source workspace, but
   no chat transcript content.
 - Search is performed locally inside the extension webview.
-- Prompt routing is ranked locally. The routing prompt is placed into the
-  selected native chat input and is not submitted by the extension.
-- Prompt routing stores a compact local index under the extension's global
-  storage. It contains chat metadata and deduplicated terms derived from the
-  full local transcript.
 - The viewer stores a local cache under extension global storage containing
   rendered transcript data, statistics, workspace metadata, and activity state
   so the list can survive a same-window workspace reload. The cache remains on
   the local machine and is written with user-only file permissions.
-- When semantic routing is enabled, the extension sends chunks covering the
-  complete discussion, plus each routing prompt, to the configured Azure
-  OpenAI embedding endpoint. It stores returned vectors locally and sends only
-  changed transcript chunks during later refreshes.
-- API keys are stored through VS Code SecretStorage and are not written to
-  settings or the routing index.
 
 Focused-workspace recommendations are calculated locally from stored working
 directories, attachments, references, citations, edits, and tool metadata. The
@@ -65,8 +52,7 @@ extension state. Transcript contents are not stored there.
 
 ## Network access
 
-Lexical routing makes no network requests. Semantic routing makes HTTPS
-requests only to the Azure OpenAI endpoint configured by the user. VS Code,
+The extension makes no network requests. VS Code,
 GitHub Copilot, installed extensions, and opened workspaces may independently
 use network services according to their own settings and policies.
 

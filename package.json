@@ -35,17 +35,12 @@
     "copilot",
     "history",
     "search",
-    "router",
     "workspace",
     "conversation"
   ],
   "activationEvents": [
     "onView:crossWorkspaceChatViewer.sessions",
     "onCommand:crossWorkspaceChatViewer.open",
-    "onCommand:crossWorkspaceChatViewer.routePrompt",
-    "onCommand:crossWorkspaceChatViewer.configureAzureEmbeddings",
-    "onCommand:crossWorkspaceChatViewer.rebuildSemanticIndex",
-    "onCommand:crossWorkspaceChatViewer.disableSemanticRouting",
     "onStartupFinished"
   ],
   "main": "./extension.js",
@@ -78,22 +73,6 @@
         "command": "crossWorkspaceChatViewer.refresh",
         "title": "Workspace Chats: Refresh",
         "icon": "$(refresh)"
-      },
-      {
-        "command": "crossWorkspaceChatViewer.routePrompt",
-        "title": "Workspace Chats: Route Prompt"
-      },
-      {
-        "command": "crossWorkspaceChatViewer.configureAzureEmbeddings",
-        "title": "Workspace Chats: Configure Azure Semantic Routing"
-      },
-      {
-        "command": "crossWorkspaceChatViewer.rebuildSemanticIndex",
-        "title": "Workspace Chats: Rebuild Semantic Index"
-      },
-      {
-        "command": "crossWorkspaceChatViewer.disableSemanticRouting",
-        "title": "Workspace Chats: Disable Semantic Routing and Remove Key"
       }
     ],
     "menus": {
@@ -140,33 +119,6 @@
           "type": "boolean",
           "default": true,
           "description": "Immediately continue the native chat when it is selected in the extension list. Disable this and enable chat preview to use Continue chat manually."
-        },
-        "crossWorkspaceChatViewer.routePromptsAutomatically": {
-          "type": "boolean",
-          "default": true,
-          "description": "Automatically open the highest-ranked chat when routing a prompt instead of showing the ranked thread picker."
-        },
-        "crossWorkspaceChatViewer.semanticRouting.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Use a configured Azure OpenAI embedding deployment to rank chats semantically. Full transcript text is sent to that endpoint while the index is built."
-        },
-        "crossWorkspaceChatViewer.semanticRouting.azure.endpoint": {
-          "type": "string",
-          "default": "",
-          "description": "Azure OpenAI resource endpoint, such as https://your-resource.openai.azure.com."
-        },
-        "crossWorkspaceChatViewer.semanticRouting.azure.deployment": {
-          "type": "string",
-          "default": "text-embedding-3-small",
-          "description": "Azure OpenAI embedding deployment name."
-        },
-        "crossWorkspaceChatViewer.semanticRouting.dimensions": {
-          "type": "integer",
-          "minimum": 256,
-          "maximum": 1536,
-          "default": 256,
-          "description": "Embedding dimensions requested from text-embedding-3-small. Lower values reduce local index size."
         }
       }
     }

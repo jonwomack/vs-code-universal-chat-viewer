@@ -2,7 +2,7 @@
 
 Find and continue local VS Code chat sessions without remembering which workspace contained them.
 
-Cross-Workspace Chat Viewer provides one searchable sidebar for chats stored by VS Code, VS Code Insiders, and GitHub Copilot CLI. Search across workspace names, titles, prompts, and responses, reopen the original workspace, or route a new prompt into the most relevant existing VS Code thread.
+Cross-Workspace Chat Viewer provides one searchable sidebar for chats stored by VS Code, VS Code Insiders, and GitHub Copilot CLI. Search across workspace names, titles, prompts, and responses, preview transcripts, or reopen an existing chat in its original workspace.
 
 Marketplace identifier: `jonwomack.cross-workspace-chat-viewer`
 
@@ -25,8 +25,6 @@ Marketplace identifier: `jonwomack.cross-workspace-chat-viewer`
   attachments, references, edits, tool activity, or working-directory use.
 - Open the original raw transcript for recovery or inspection.
 - Read current `.jsonl` and legacy `.json` session formats.
-- Rank existing chats for a new prompt, open the best thread, and pre-fill the
-  prompt for review without submitting it.
 
 ## Screenshots
 
@@ -69,12 +67,9 @@ directories, edits, attachments, references, and tool paths. After confirmation
 it creates an extension-managed recovered workspace and moves the chat there.
 It never recreates missing project contents or empty placeholder directories.
 
-Use the prompt composer pinned beneath the chat list and select **Send**, or
-press Enter. By default, the highest-ranked current-product thread opens
-automatically. Disable automatic routing to review the top 20 matches. The
-prompt is placed in the native chat input but is never submitted. The composer
-also reports how many chats are indexed, whether transcript changes are still
-pending, and when semantic routing is temporarily using lexical fallback.
+The extension only browses and reopens existing chats. Start new chats and
+write prompts in VS Code's native chat interface; the viewer does not compose,
+route, or pre-fill prompts.
 
 Chat sessions and aggregate statistics are loaded once per extension session.
 Collapsing and reopening the view restores that in-memory data rather than
@@ -101,20 +96,6 @@ chat** manually.
 When a same-window workspace change is required, Workspace Chats reopens after
 the workbench reload and then continues the pending native chat.
 
-Prompt routing uses a persistent local index built in the background. Transcript
-path, size, and modification time identify changes, so unchanged chats are not
-reparsed for every prompt. The index covers terms from the entire discussion,
-including prompts and responses.
-
-Semantic routing is enabled by default. If it has not been configured, sending
-the first prompt opens the secure setup flow for the Azure OpenAI endpoint and
-API key. The extension chunks each complete discussion, sends changed chunks
-to the configured embedding deployment, and stores returned vectors locally.
-The key is kept in VS Code SecretStorage and is never written to settings.
-Lexical indexing remains available before setup. Use **Rebuild Semantic Index**
-after changing models or dimensions, or **Disable Semantic Routing and Remove
-Key** to return to local lexical ranking and delete stored vectors.
-
 ## Settings
 
 | Setting | Default | Purpose |
@@ -125,18 +106,12 @@ Key** to return to local lexical ranking and delete stored vectors.
 | `crossWorkspaceChatViewer.openNewWindowWhenChatActive` | `true` | Preserve an active current-workspace chat by opening the destination separately. |
 | `crossWorkspaceChatViewer.displayChatPreview` | `false` | Display a selected transcript inside the extension. |
 | `crossWorkspaceChatViewer.autoOpenChatOnSelect` | `true` | Continue the native chat immediately when its list item is selected. |
-| `crossWorkspaceChatViewer.routePromptsAutomatically` | `true` | Open the highest-ranked chat automatically instead of showing the ranked thread picker. |
-| `crossWorkspaceChatViewer.semanticRouting.enabled` | `true` | Rank chats with Azure embeddings after secure endpoint-and-key configuration. |
-| `crossWorkspaceChatViewer.semanticRouting.azure.endpoint` | `""` | Azure OpenAI resource endpoint. |
-| `crossWorkspaceChatViewer.semanticRouting.azure.deployment` | `text-embedding-3-small` | Embedding deployment name. |
-| `crossWorkspaceChatViewer.semanticRouting.dimensions` | `256` | Vector dimensions stored for each discussion chunk. |
 
 ## Privacy
 
 Cross-Workspace Chat Viewer reads chat transcripts directly from local VS Code
-storage and GitHub Copilot CLI session state. It does not collect telemetry. Lexical routing makes no network
-requests. Optional semantic routing sends transcript chunks to the Azure
-OpenAI endpoint explicitly configured by the user. See
+storage and GitHub Copilot CLI session state. It does not collect telemetry or
+make network requests. See
 [PRIVACY.md](PRIVACY.md) for details.
 
 ## Known limitations

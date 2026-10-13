@@ -35,18 +35,11 @@ const {
   sameStoredWorkspaceUri
 } = require("./src/workspaceIdentity");
 const {
-  chooseAutomatically,
-  rankSessions,
-  rankSessionsByEmbedding
-} = require("./src/router");
-const {
   analyzeWorkspaceUsage,
   isUnavailableRecoveryPathError,
   normalizeLocalPath,
   recoveryLocationPaths
 } = require("./src/workspaceAdvisor");
-const { RouteIndex } = require("./src/routeIndex");
-const { AzureEmbeddingClient } = require("./src/azureEmbeddings");
 const {
   classifyAppendedChatActivity,
   chatIsInProgress
@@ -57,9 +50,6 @@ const LEGACY_CONFIGURATION_SECTION = "universalChatViewer";
 const PENDING_SESSION_KEY = "crossWorkspaceChatViewer.pendingSession";
 const LEGACY_PENDING_SESSION_KEY = "universalChatViewer.pendingSession";
 const PENDING_IMPORT_KEY = "crossWorkspaceChatViewer.pendingImport";
-const PENDING_ROUTE_KEY = "crossWorkspaceChatViewer.pendingRoute";
-const PENDING_ROUTE_MAX_AGE_MS = 2 * 60 * 1000;
-const AZURE_EMBEDDING_KEY = "crossWorkspaceChatViewer.azureEmbeddingApiKey";
 const VIEWER_CACHE_VERSION = 3;
 // Keep the shared filename until both Stable and Insiders have upgraded.
 const CROSS_PRODUCT_HANDOFF = path.join(
@@ -68,10 +58,9 @@ const CROSS_PRODUCT_HANDOFF = path.join(
 );
 
 class ChatViewerProvider {
-  constructor(context, output, routeIndex) {
+  constructor(context, output) {
     this.context = context;
     this.output = output;
-    this.routeIndex = routeIndex;
     this.cachePath = path.join(context.globalStorageUri.fsPath, "chat-viewer-cache.json");
     this.view = undefined;
     this.sessions = [];
@@ -86,9 +75,6 @@ class ChatViewerProvider {
     this.newSessionTimer = undefined;
     this.pendingNewFiles = new Set();
     this.cacheLoadPromise = undefined;
-    context.subscriptions.push(routeIndex.onDidChangeStatus((status) =>
-      this.postIndexStatus(status)
-    ));
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         event.affectsConfiguration(`${CONFIGURATION_SECTION}.displayChatPreview`)
@@ -110,7 +96,6 @@ class ChatViewerProvider {
 
   async handleMessage(message) {
     if (message.type === "ready") {
-      this.postIndexStatus(this.routeIndex.getStatus());
       this.postPreferences();
       await this.loadCache();
       if (this.hasLoaded) {
@@ -126,14 +111,6 @@ class ChatViewerProvider {
     }
     if (message.type === "refresh") {
       await this.refresh();
-      return;
-    }
-    if (message.type === "route") {
-      try {
-        await routePrompt(this.context, message.prompt, this, this.routeIndex);
-      } catch (error) {
-        this.showError(error);
-      }
       return;
     }
 
@@ -285,17 +262,6 @@ class ChatViewerProvider {
         availableProducts,
         this.activity.get(session.key)
       ))
-    });
-  }
-
-  postStatus(status) {
-    this.view?.webview.postMessage({ type: "routeStatus", ...status });
-  }
-
-  postIndexStatus(status) {
-    this.view?.webview.postMessage({
-      type: "indexStatus",
-      message: formatIndexStatus(status)
     });
   }
 
@@ -667,9 +633,6 @@ class ChatViewerProvider {
         )
       });
       this.postActivity(key);
-      if (!inProgress) {
-        void this.routeIndex.refresh();
-      }
       await this.persistCache();
     } catch (error) {
       this.output.appendLine(`Unable to update changed chat: ${error.stack || error.message}`);
@@ -690,7 +653,6 @@ class ChatViewerProvider {
     this.transcriptOffsets.delete(session.filePath);
     this.view?.webview.postMessage({ type: "removeSession", key: session.key });
     await this.persistCache();
-    void this.routeIndex.refresh();
   }
 
   dispose() {
@@ -714,29 +676,6 @@ class ChatViewerProvider {
     vscode.window.showErrorMessage(`Cross-Workspace Chat Viewer: ${error.message}`);
   }
 
-  showError(error) {
-    const detail = error instanceof Error ? error.message : String(error);
-    const message = `Could not route the prompt: ${detail}`;
-    this.output.appendLine(`${message}\n${error.stack || ""}`);
-    this.postStatus({ kind: "error", message });
-    vscode.window.showErrorMessage(message);
-  }
-}
-
-function formatIndexStatus(status) {
-  if (status.semanticEnabled) {
-    if (status.refreshing && status.pendingTranscripts > 0) {
-      return `Semantic index: ${status.semanticIndexedChats} chats ready · ${status.pendingTranscripts} transcript changes pending`;
-    }
-    if (status.semanticIndexedChats < status.indexedChats) {
-      return `Semantic index: ${status.semanticIndexedChats}/${status.indexedChats} chats ready · lexical fallback active`;
-    }
-    return `Semantic index: ${status.semanticIndexedChats} chats ready`;
-  }
-  if (status.refreshing && status.pendingTranscripts > 0) {
-    return `Local index: ${status.indexedChats} chats ready · ${status.pendingTranscripts} transcript changes pending`;
-  }
-  return `Local index: ${status.indexedChats} chats ready`;
 }
 
 function webviewSession(
@@ -1259,268 +1198,6 @@ async function openNativeChat(sessionId) {
   });
 }
 
-async function routePrompt(context, prompt, provider, routeIndex) {
-  const trimmedPrompt = typeof prompt === "string" ? prompt.trim() : "";
-  if (!trimmedPrompt) {
-    provider.postStatus({ kind: "error", message: "Enter a prompt first." });
-    return;
-  }
-  const configuration = vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
-  if (
-    configuration.get("semanticRouting.enabled", true)
-    && !await semanticRoutingIsConfigured(context)
-  ) {
-    provider.postStatus({
-      kind: "working",
-      message: "Configure Azure semantic routing to send this prompt."
-    });
-    if (!await configureAzureEmbeddings(context, routeIndex)) {
-      provider.postStatus({ kind: "", message: "Semantic routing setup canceled." });
-      return;
-    }
-  }
-
-  provider.postStatus({ kind: "working", message: "Ranking indexed chats..." });
-  const sessions = await routeIndex.getSessions();
-  if (!sessions.length) {
-    throw new Error("no continuable local chat sessions were found");
-  }
-
-  const embeddingClient = await createEmbeddingClient(context);
-  const semanticReady = embeddingClient
-    && sessions.every((session) =>
-      session.embeddingSignature === embeddingClient.signature
-      && Array.isArray(session.embeddingVectors)
-      && session.embeddingVectors.length > 0
-    );
-  const ranked = semanticReady
-    ? rankSessionsByEmbedding(
-      (await embeddingClient.embed([trimmedPrompt]))[0],
-      sessions
-    )
-    : rankSessions(trimmedPrompt, sessions);
-  const autoRoute = vscode.workspace
-    .getConfiguration(CONFIGURATION_SECTION)
-    .get("routePromptsAutomatically", true);
-  const automaticSelection = chooseAutomatically(ranked, autoRoute);
-  const selected = automaticSelection || await vscode.window.showQuickPick(
-    routeQuickPickItems(ranked, semanticReady),
-    {
-      title: "Choose the destination chat",
-      placeHolder: "Threads are ranked from the prompt and prior conversation",
-      matchOnDescription: true,
-      matchOnDetail: true
-    }
-  );
-  if (!selected) {
-    provider.postStatus({ kind: "", message: "No thread selected." });
-    return;
-  }
-
-  provider.postStatus({
-    kind: "working",
-    message: automaticSelection
-      ? `Best match: "${selected.session.title}". Opening automatically...`
-      : `Opening "${selected.session.title}"...`
-  });
-  const opened = await openSelectedRoute(
-    context,
-    selected.session,
-    trimmedPrompt,
-    provider.shouldProtectActiveChat(selected.session)
-  );
-  if (!opened) {
-    provider.postStatus({
-      kind: "working",
-      message: `Opening workspace for "${selected.session.title}"...`
-    });
-    return;
-  }
-  provider.postStatus({
-    kind: "success",
-    message: `Routed to "${selected.session.title}". Review the prompt and press Enter.`
-  });
-}
-
-function routeQuickPickItems(ranked, semantic) {
-  return ranked.slice(0, 20).map((result, index) => {
-    const date = new Date(result.session.modifiedAt).toLocaleDateString();
-    const reasons = semantic
-      ? `Semantic similarity: ${Math.round(result.semanticScore * 100)}%`
-      : result.matchedTerms.length
-        ? `Matches: ${result.matchedTerms.join(", ")}`
-        : "No direct term match; ranked by recency";
-    return {
-      label: `${index + 1}. ${result.session.title}`,
-      description: result.session.workspaceName,
-      detail: `${reasons} · ${result.session.messageCount} prompts · updated ${date}`,
-      session: result.session
-    };
-  });
-}
-
-async function createEmbeddingClient(context) {
-  const configuration = vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
-  if (!configuration.get("semanticRouting.enabled", true)) {
-    return undefined;
-  }
-  const endpoint = configuration.get("semanticRouting.azure.endpoint", "");
-  const deployment = configuration.get(
-    "semanticRouting.azure.deployment",
-    "text-embedding-3-small"
-  );
-  const dimensions = configuration.get("semanticRouting.dimensions", 256);
-  const apiKey = await context.secrets.get(AZURE_EMBEDDING_KEY);
-  if (!endpoint.trim() || !apiKey) {
-    return undefined;
-  }
-  return new AzureEmbeddingClient({
-    endpoint,
-    deployment,
-    dimensions,
-    apiKey
-  });
-}
-
-async function semanticRoutingIsConfigured(context) {
-  const configuration = vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
-  return Boolean(
-    configuration.get("semanticRouting.azure.endpoint", "").trim()
-    && await context.secrets.get(AZURE_EMBEDDING_KEY)
-  );
-}
-
-async function configureAzureEmbeddings(context, routeIndex) {
-  const configuration = vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
-  const endpoint = await vscode.window.showInputBox({
-    title: "Configure Azure semantic routing",
-    prompt: "Azure OpenAI resource endpoint",
-    value: configuration.get("semanticRouting.azure.endpoint", ""),
-    placeHolder: "https://your-resource.openai.azure.com",
-    ignoreFocusOut: true
-  });
-  if (endpoint === undefined) {
-    return false;
-  }
-  const apiKey = await vscode.window.showInputBox({
-    title: "Configure Azure semantic routing",
-    prompt: "Azure OpenAI API key (stored securely in VS Code SecretStorage)",
-    password: true,
-    ignoreFocusOut: true
-  });
-  if (apiKey === undefined) {
-    return false;
-  }
-  if (!apiKey.trim()) {
-    throw new Error("Azure OpenAI API key cannot be empty");
-  }
-  const client = new AzureEmbeddingClient({
-    endpoint: endpoint.trim(),
-    deployment: configuration.get(
-      "semanticRouting.azure.deployment",
-      "text-embedding-3-small"
-    ),
-    dimensions: configuration.get("semanticRouting.dimensions", 256),
-    apiKey: apiKey.trim()
-  });
-  await client.embed(["Test semantic routing connection"]);
-
-  await context.secrets.store(AZURE_EMBEDDING_KEY, apiKey.trim());
-  await configuration.update(
-    "semanticRouting.azure.endpoint",
-    endpoint.trim(),
-    vscode.ConfigurationTarget.Global
-  );
-  await configuration.update(
-    "semanticRouting.enabled",
-    true,
-    vscode.ConfigurationTarget.Global
-  );
-
-  await routeIndex.clearEmbeddings();
-  void routeIndex.refresh();
-  vscode.window.showInformationMessage(
-    "Azure semantic routing is connected. Full-discussion embeddings are building in the background."
-  );
-  return true;
-}
-
-async function rebuildSemanticIndex(context, routeIndex) {
-  const client = await createEmbeddingClient(context);
-  if (!client) {
-    throw new Error("Enable and configure semantic routing first");
-  }
-  await client.embed(["Test semantic routing connection"]);
-  await routeIndex.clearEmbeddings();
-  void routeIndex.refresh();
-  vscode.window.showInformationMessage(
-    "Semantic routing index rebuild started in the background."
-  );
-}
-
-async function disableSemanticRouting(context, routeIndex) {
-  await context.secrets.delete(AZURE_EMBEDDING_KEY);
-  await vscode.workspace.getConfiguration(CONFIGURATION_SECTION).update(
-    "semanticRouting.enabled",
-    false,
-    vscode.ConfigurationTarget.Global
-  );
-  await routeIndex.clearEmbeddings();
-  vscode.window.showInformationMessage(
-    "Semantic routing and its stored API key have been removed. Local lexical routing remains available."
-  );
-}
-
-async function openSelectedRoute(context, session, prompt, protectActiveChat = false) {
-  const target = workspaceUri(session);
-  if (!target) {
-    throw new Error(`"${session.title}" has no workspace metadata`);
-  }
-  if (!isCurrentWorkspace(target)) {
-    await context.globalState.update(PENDING_ROUTE_KEY, {
-      sessionId: session.id,
-      title: session.title,
-      workspaceUri: target,
-      prompt,
-      savedAt: Date.now()
-    });
-    await openWorkspaceInCurrentProduct(target, protectActiveChat);
-    return false;
-  }
-
-  await openAndPrefill(session.id, prompt);
-  return true;
-}
-
-async function openAndPrefill(sessionId, prompt) {
-  await openNativeChat(sessionId);
-  await vscode.commands.executeCommand("workbench.action.chat.focusInput");
-  await vscode.commands.executeCommand("editor.action.selectAll");
-  await vscode.commands.executeCommand("type", { text: prompt });
-}
-
-async function resumePendingRoute(context) {
-  const pending = context.globalState.get(PENDING_ROUTE_KEY);
-  if (!pending || Date.now() - pending.savedAt > PENDING_ROUTE_MAX_AGE_MS) {
-    if (pending) {
-      await context.globalState.update(PENDING_ROUTE_KEY, undefined);
-    }
-    return;
-  }
-  if (!isCurrentWorkspace(pending.workspaceUri)) {
-    return;
-  }
-
-  await context.globalState.update(PENDING_ROUTE_KEY, undefined);
-  await vscode.commands.executeCommand(
-    "workbench.view.extension.crossWorkspaceChatViewer"
-  );
-  await openAndPrefill(pending.sessionId, pending.prompt);
-  vscode.window.showInformationMessage(
-    `Routed to "${pending.title}". Review the prompt and press Enter.`
-  );
-}
-
 async function resumePendingSession(context) {
   const stored = readPendingSessions(context);
   const pending = deduplicateHandoffs(
@@ -1768,17 +1445,6 @@ function webviewHtml(webview) {
     .role { margin-bottom: 4px; color: var(--vscode-descriptionForeground); font-size: 0.82em; font-weight: 600; text-transform: uppercase; }
     .text { padding: 8px; background: var(--vscode-textCodeBlock-background); white-space: pre-wrap; word-break: break-word; }
     .empty { padding: 24px 12px; color: var(--vscode-descriptionForeground); text-align: center; }
-    #composer { flex: none; padding: 8px; border-top: 1px solid var(--vscode-sideBar-border); background: var(--vscode-sideBar-background); }
-    #composer[hidden] { display: none; }
-    #composer-box { display: flex; align-items: flex-end; gap: 6px; padding: 5px; border: 1px solid var(--vscode-input-border, transparent); background: var(--vscode-input-background); }
-    #composer-box:focus-within { border-color: var(--vscode-focusBorder); }
-    #routePrompt { flex: 1; min-height: 38px; max-height: 120px; resize: vertical; padding: 5px; border: 0; outline: 0; color: var(--vscode-input-foreground); background: transparent; font: inherit; }
-    #sendPrompt { flex: none; padding: 6px 10px; border: 0; color: var(--vscode-button-foreground); background: var(--vscode-button-background); cursor: pointer; }
-    #sendPrompt:hover { background: var(--vscode-button-hoverBackground); }
-    #indexStatus, #routeStatus { margin-top: 5px; color: var(--vscode-descriptionForeground); font-size: 0.82em; line-height: 1.3; }
-    #routeStatus:empty { display: none; }
-    #routeStatus.error { color: var(--vscode-errorForeground); }
-    #routeStatus.success { color: var(--vscode-testing-iconPassed); }
   </style>
 </head>
 <body>
@@ -1796,14 +1462,6 @@ function webviewHtml(webview) {
     </div>
   </header>
   <main id="sessions"></main>
-  <section id="composer" aria-label="Route a prompt">
-    <div id="composer-box">
-      <textarea id="routePrompt" placeholder="Describe what you want to build..." aria-label="Prompt"></textarea>
-      <button id="sendPrompt" type="button" title="Route prompt">Send</button>
-    </div>
-    <div id="indexStatus" role="status" aria-live="polite">Loading index status...</div>
-    <div id="routeStatus" role="status" aria-live="polite"></div>
-  </section>
   <script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
     const search = document.getElementById("search");
@@ -1814,11 +1472,6 @@ function webviewHtml(webview) {
     const detailHeader = document.getElementById("detailHeader");
     const detailActions = document.getElementById("detailActions");
     const backButton = document.getElementById("back");
-    const composer = document.getElementById("composer");
-    const routePromptInput = document.getElementById("routePrompt");
-    const sendPrompt = document.getElementById("sendPrompt");
-    const indexStatus = document.getElementById("indexStatus");
-    const routeStatus = document.getElementById("routeStatus");
     let sessions = [];
     let scanComplete = false;
     let statsReady = false;
@@ -1954,7 +1607,6 @@ function webviewHtml(webview) {
       const session = sessions.find(candidate => candidate.key === openSessionKey);
       listHeader.hidden = Boolean(session);
       detailHeader.hidden = !session;
-      composer.hidden = Boolean(session);
       if (session) {
         renderDetail(session);
       } else {
@@ -2131,18 +1783,6 @@ function webviewHtml(webview) {
       pointerInsideList = false;
       scheduleListRender();
     });
-    function sendRoutePrompt() {
-      routeStatus.className = "";
-      routeStatus.textContent = "Finding the best chat...";
-      vscode.postMessage({ type: "route", prompt: routePromptInput.value });
-    }
-    sendPrompt.addEventListener("click", sendRoutePrompt);
-    routePromptInput.addEventListener("keydown", event => {
-      if (event.key === "Enter" && !event.shiftKey) {
-        event.preventDefault();
-        sendRoutePrompt();
-      }
-    });
     window.addEventListener("message", event => {
       if (event.data.type === "session") {
         const index = sessions.findIndex(session => session.key === event.data.session.key);
@@ -2196,11 +1836,6 @@ function webviewHtml(webview) {
         listHeader.hidden = false;
         detailHeader.hidden = true;
         summary.textContent = "Unable to scan chats: " + event.data.message;
-      } else if (event.data.type === "indexStatus") {
-        indexStatus.textContent = event.data.message;
-      } else if (event.data.type === "routeStatus") {
-        routeStatus.className = event.data.kind || "";
-        routeStatus.textContent = event.data.message;
       } else if (event.data.type === "preferences") {
         displayChatPreview = event.data.displayChatPreview;
         if (!displayChatPreview && openSessionKey) {
@@ -2228,21 +1863,6 @@ async function migrateLegacyConfiguration() {
       field: "workspaceFolderValue"
     }]);
   }
-  const configuration = vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
-  for (const setting of [
-    "semanticRouting.azure.authentication",
-    "semanticRouting.azure.subscription"
-  ]) {
-    await configuration.update(setting, undefined, vscode.ConfigurationTarget.Global);
-  }
-
-  await migrateRouterConfigurationAtResource(undefined, scopes);
-  for (const folder of vscode.workspace.workspaceFolders || []) {
-    await migrateRouterConfigurationAtResource(folder.uri, [{
-      target: vscode.ConfigurationTarget.WorkspaceFolder,
-      field: "workspaceFolderValue"
-    }]);
-  }
 }
 
 async function migrateConfigurationAtResource(resource, settings, scopes) {
@@ -2264,23 +1884,6 @@ async function migrateConfigurationAtResource(resource, settings, scopes) {
   }
 }
 
-async function migrateRouterConfigurationAtResource(resource, scopes) {
-  const current = vscode.workspace.getConfiguration(CONFIGURATION_SECTION, resource);
-  const legacy = vscode.workspace.getConfiguration("chatThreadRouter", resource);
-  const currentValues = current.inspect("routePromptsAutomatically");
-  const legacyValues = legacy.inspect("autoRoute");
-  for (const scope of scopes) {
-    const legacyValue = legacyValues?.[scope.field];
-    if (legacyValue === undefined) {
-      continue;
-    }
-    if (currentValues?.[scope.field] === undefined) {
-      await current.update("routePromptsAutomatically", legacyValue, scope.target);
-    }
-    await legacy.update("autoRoute", undefined, scope.target);
-  }
-}
-
 async function activate(context) {
   const output = vscode.window.createOutputChannel("Cross-Workspace Chat Viewer");
   try {
@@ -2292,36 +1895,10 @@ async function activate(context) {
     );
   }
 
-  const routeIndex = new RouteIndex(
-    path.join(context.globalStorageUri.fsPath, "prompt-route-index.json"),
-    () => {
-      const configuration = vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
-      return defaultStorageRoots(
-        context.globalStorageUri.fsPath,
-        configuration.get("additionalStorageRoots", []),
-        currentProductId()
-      ).filter((root) =>
-        root.id === currentProductId() || root.id.startsWith("custom-")
-      );
-    },
-    {
-      log: (message) => output.appendLine(message),
-      embeddingProvider: () => createEmbeddingClient(context)
-    }
-  );
-  await routeIndex.start();
-  const routeIndexTimer = setInterval(() => {
-    void routeIndex.refresh().catch((error) => {
-      output.appendLine(`Unable to refresh prompt-routing index: ${error.stack || error.message}`);
-    });
-  }, 30_000);
-  routeIndexTimer.unref?.();
-
-  const provider = new ChatViewerProvider(context, output, routeIndex);
+  const provider = new ChatViewerProvider(context, output);
   context.subscriptions.push(
     output,
     provider,
-    { dispose: () => clearInterval(routeIndexTimer) },
     vscode.window.registerWebviewViewProvider(
       "crossWorkspaceChatViewer.sessions",
       provider,
@@ -2330,41 +1907,6 @@ async function activate(context) {
     vscode.commands.registerCommand("crossWorkspaceChatViewer.refresh", () =>
       provider.refresh().catch((error) => provider.showRefreshError(error))
     ),
-    vscode.commands.registerCommand("crossWorkspaceChatViewer.routePrompt", async () => {
-      const prompt = await vscode.window.showInputBox({
-        title: "Route a prompt to an existing Copilot chat",
-        prompt: "The prompt is pre-filled in the selected thread, not submitted.",
-        ignoreFocusOut: true
-      });
-      if (prompt !== undefined) {
-        try {
-          await routePrompt(context, prompt, provider, routeIndex);
-        } catch (error) {
-          provider.showError(error);
-        }
-      }
-    }),
-    vscode.commands.registerCommand(
-      "crossWorkspaceChatViewer.configureAzureEmbeddings",
-      () => configureAzureEmbeddings(context, routeIndex).catch((error) => {
-        output.appendLine(`Unable to configure Azure embeddings: ${error.stack || error.message}`);
-        vscode.window.showErrorMessage(`Unable to configure Azure embeddings: ${error.message}`);
-      })
-    ),
-    vscode.commands.registerCommand(
-      "crossWorkspaceChatViewer.rebuildSemanticIndex",
-      () => rebuildSemanticIndex(context, routeIndex).catch((error) => {
-        output.appendLine(`Unable to rebuild semantic index: ${error.stack || error.message}`);
-        vscode.window.showErrorMessage(`Unable to rebuild semantic index: ${error.message}`);
-      })
-    ),
-    vscode.commands.registerCommand(
-      "crossWorkspaceChatViewer.disableSemanticRouting",
-      () => disableSemanticRouting(context, routeIndex).catch((error) => {
-        output.appendLine(`Unable to disable semantic routing: ${error.stack || error.message}`);
-        vscode.window.showErrorMessage(`Unable to disable semantic routing: ${error.message}`);
-      })
-    ),
     vscode.commands.registerCommand("crossWorkspaceChatViewer.open", async () => {
       await vscode.commands.executeCommand("workbench.view.extension.crossWorkspaceChatViewer");
     })
@@ -2372,8 +1914,7 @@ async function activate(context) {
   Promise.all([
     resumePendingSession(context),
     resumeCrossProductSession(),
-    resumePendingImports(context),
-    resumePendingRoute(context)
+    resumePendingImports(context)
   ]).catch((error) => {
     output.appendLine(`Unable to resume chat: ${error.stack || error.message}`);
     vscode.window.showErrorMessage(`Unable to resume chat: ${error.message}`);

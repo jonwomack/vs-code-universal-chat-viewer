@@ -2,6 +2,15 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## Unreleased
+
+### Removed
+
+- Prompt composition, automatic routing, and pre-filling existing chats.
+- Routing commands and settings, Azure embedding setup, and background
+  lexical/semantic indexing. Chat search, previews, and native continuation
+  remain available.
+
 ## 0.4.21 - 2026-10-07
 
 ### Fixed
