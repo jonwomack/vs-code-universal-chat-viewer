@@ -20,6 +20,7 @@ const {
   defaultCopilotCliRoot,
   scanCopilotCliSessions
 } = require("./src/copilotCliStorage");
+const { writeContinuationTranscript } = require("./src/chatContinuation");
 const {
   resolveInstalledProductCommand,
   resolveProductCommand
@@ -50,7 +51,7 @@ const LEGACY_CONFIGURATION_SECTION = "universalChatViewer";
 const PENDING_SESSION_KEY = "crossWorkspaceChatViewer.pendingSession";
 const LEGACY_PENDING_SESSION_KEY = "universalChatViewer.pendingSession";
 const PENDING_IMPORT_KEY = "crossWorkspaceChatViewer.pendingImport";
-const VIEWER_CACHE_VERSION = 3;
+const VIEWER_CACHE_VERSION = 5;
 // Keep the shared filename until both Stable and Insiders have upgraded.
 const CROSS_PRODUCT_HANDOFF = path.join(
   os.tmpdir(),
@@ -81,6 +82,13 @@ class ChatViewerProvider {
         || event.affectsConfiguration(`${CONFIGURATION_SECTION}.autoOpenChatOnSelect`)
       ) {
         this.postPreferences();
+      }
+      if (["storageRoots", "additionalStorageRoots", "copilotSessionRoots"].some(
+        (setting) => event.affectsConfiguration(`${CONFIGURATION_SECTION}.${setting}`)
+      )) {
+        void Promise.resolve(this.refreshPromise)
+          .then(() => this.refresh())
+          .catch((error) => this.showRefreshError(error));
       }
     }));
   }
@@ -120,12 +128,13 @@ class ChatViewerProvider {
       return;
     }
 
-    if (message.type === "selectSession") {
+    if (message.type === "selectSession" || message.type === "previewSession") {
       const protectActiveChat = this.shouldProtectActiveChat(session);
       this.activity.delete(session.key);
       await this.persistCache();
       if (
-        session.canContinue !== false
+        message.type === "selectSession"
+        && session.canContinue !== false
         &&
         vscode.workspace
           .getConfiguration(CONFIGURATION_SECTION)
@@ -155,6 +164,13 @@ class ChatViewerProvider {
       );
     } else if (message.type === "openWorkspace") {
       await openWorkspace(session, true);
+    } else if (message.type === "continueAsNew") {
+      await continueAsNewChat(this.context, session);
+    } else if (message.type === "copyTranscriptPath") {
+      await vscode.env.clipboard.writeText(session.filePath);
+      vscode.window.showInformationMessage("Copied the original transcript's full path.");
+    } else if (message.type === "openRaw") {
+      await vscode.window.showTextDocument(vscode.Uri.file(session.filePath), { preview: false });
     }
   }
 
@@ -193,20 +209,20 @@ class ChatViewerProvider {
         )
       });
     };
-    const [vscodeResult, cliResult] = await Promise.all([
+    const [vscodeResult, ...copilotResults] = await Promise.all([
       scanStorageRoots(roots, {
         shouldContinue: () => refreshVersion === this.refreshVersion,
         onSession
       }),
-      scanCopilotCliSessions(defaultCopilotCliRoot(), {
+      ...this.copilotSessionRoots().map((root) => scanCopilotCliSessions(root, {
         shouldContinue: () => refreshVersion === this.refreshVersion,
         onSession
-      })
+      }))
     ]);
     if (refreshVersion !== this.refreshVersion) {
       return;
     }
-    this.sessions = [...vscodeResult.sessions, ...cliResult.sessions]
+    this.sessions = [...vscodeResult.sessions, ...copilotResults.flatMap((result) => result.sessions)]
       .sort((left, right) => right.modifiedAt - left.modifiedAt);
     this.workspaces = vscodeResult.workspaces;
     for (const session of this.sessions) {
@@ -218,9 +234,9 @@ class ChatViewerProvider {
     this.pendingNewFiles.clear();
 
     this.output.clear();
-    const errors = [...vscodeResult.errors, ...cliResult.errors];
+    const errors = [...vscodeResult.errors, ...copilotResults.flatMap((result) => result.errors)];
     this.output.appendLine(
-      `Scanned ${roots.length} VS Code storage roots and GitHub Copilot CLI history; found ${this.sessions.length} chats.`
+      `Scanned ${roots.length} VS Code storage roots and ${copilotResults.length} Copilot session roots; found ${this.sessions.length} chats.`
     );
     for (const error of errors) {
       this.output.appendLine(error);
@@ -295,8 +311,15 @@ class ChatViewerProvider {
     return defaultStorageRoots(
       this.context.globalStorageUri.fsPath,
       configuration.get("additionalStorageRoots", []),
-      currentProductId()
+      currentProductId(),
+      configuration.get("storageRoots", null)
     );
+  }
+
+  copilotSessionRoots() {
+    const configuration = vscode.workspace.getConfiguration(CONFIGURATION_SECTION);
+    return [...new Set(configuration.get("copilotSessionRoots", [defaultCopilotCliRoot()])
+      .map((root) => path.resolve(root.replace(/^~(?=$|[\\/])/, os.homedir()))))];
   }
 
   loadCache() {
@@ -343,7 +366,7 @@ class ChatViewerProvider {
     return JSON.stringify(
       [
         ...this.storageRoots().map((root) => [root.id, path.resolve(root.path)]),
-        ["copilot-cli", defaultCopilotCliRoot()]
+        ...this.copilotSessionRoots().map((root) => ["copilot-cli", root])
       ]
     );
   }
@@ -427,21 +450,20 @@ class ChatViewerProvider {
       }
     }
 
-    try {
-      const cliEntries = await fs.promises.readdir(defaultCopilotCliRoot(), {
-        withFileTypes: true
-      });
-      if (cliEntries.some((entry) =>
-        entry.isDirectory()
-        && !knownFiles.has(path.join(defaultCopilotCliRoot(), entry.name, "events.jsonl"))
-      )) {
-        await this.refresh();
-      }
-    } catch (error) {
-      if (error.code !== "ENOENT") {
-        this.output.appendLine(
-          `Unable to reconcile GitHub Copilot CLI history: ${error.message}`
-        );
+    for (const root of this.copilotSessionRoots()) {
+      try {
+        const entries = await fs.promises.readdir(root, { withFileTypes: true });
+        if (entries.some((entry) =>
+          entry.isDirectory()
+          && !knownFiles.has(path.join(root, entry.name, "events.jsonl"))
+        )) {
+          await this.refresh();
+          return;
+        }
+      } catch (error) {
+        if (error.code !== "ENOENT") {
+          this.output.appendLine(`Unable to reconcile Copilot history at ${root}: ${error.message}`);
+        }
       }
     }
   }
@@ -484,8 +506,9 @@ class ChatViewerProvider {
       }
     }
 
+    const cliRoots = new Set(this.copilotSessionRoots());
     const cliDirectories = new Set([
-      defaultCopilotCliRoot(),
+      ...cliRoots,
       ...this.sessions
         .filter((session) => session.sourceKind === "copilot-cli")
         .map((session) => path.dirname(session.filePath))
@@ -494,7 +517,7 @@ class ChatViewerProvider {
       try {
         const watcher = fs.watch(directory, (_, fileName) => {
           if (
-            directory === defaultCopilotCliRoot()
+            cliRoots.has(directory)
             || fileName === "events.jsonl"
             || fileName === "workspace.yaml"
           ) {
@@ -506,14 +529,14 @@ class ChatViewerProvider {
         });
         watcher.on("error", (error) => {
           this.output.appendLine(
-            `GitHub Copilot CLI history watcher failed for ${directory}: ${error.message}`
+            `Copilot history watcher failed for ${directory}: ${error.message}`
           );
         });
         this.watchers.push(watcher);
       } catch (error) {
         if (error.code !== "ENOENT") {
           this.output.appendLine(
-            `Unable to watch GitHub Copilot CLI history at ${directory}: ${error.message}`
+            `Unable to watch Copilot history at ${directory}: ${error.message}`
           );
         }
       }
@@ -696,7 +719,30 @@ function webviewSession(
   };
 }
 
+async function continueAsNewChat(context, session) {
+  const commands = await vscode.commands.getCommands(true);
+  const newChatCommand = commands.includes("workbench.action.chat.newLocalChat")
+    ? "workbench.action.chat.newLocalChat"
+    : "workbench.action.chat.newChat";
+  if (!commands.includes(newChatCommand) || !commands.includes("workbench.action.chat.open")) {
+    throw new Error(
+      "This VS Code version cannot attach a transcript to a new chat. Use Copy transcript path instead."
+    );
+  }
+  const filePath = await writeContinuationTranscript(session, context.globalStorageUri.fsPath);
+  await vscode.commands.executeCommand(newChatCommand);
+  await vscode.commands.executeCommand("workbench.action.chat.open", {
+    query: "Use the attached historical conversation as context. ",
+    isPartialQuery: true,
+    attachFiles: [vscode.Uri.file(filePath)]
+  });
+}
+
 async function continueSession(context, session, protectActiveChat = false) {
+  if (session.canContinue === false) {
+    await continueAsNewChat(context, session);
+    return;
+  }
   const target = workspaceUri(session);
   if (!target) {
     vscode.window.showWarningMessage("This chat is orphaned and has no original workspace metadata.");
@@ -1578,15 +1624,15 @@ function webviewHtml(webview) {
       return (bytes / (1024 * 1024 * 1024)).toFixed(2) + " GB";
     }
 
-    function openSession(key) {
+    function openSession(key, previewOnly = false) {
       listScrollTop = container.scrollTop;
       const session = sessions.find(candidate => candidate.key === key);
       if (session) {
         session.inProgress = false;
         session.newActivity = false;
       }
-      vscode.postMessage({ type: "selectSession", key });
-      const mustPreview = session?.canContinue === false;
+      vscode.postMessage({ type: previewOnly ? "previewSession" : "selectSession", key });
+      const mustPreview = previewOnly || session?.canContinue === false;
       openSessionKey = displayChatPreview || mustPreview ? key : undefined;
       render();
       if (displayChatPreview || mustPreview) {
@@ -1704,6 +1750,14 @@ function webviewHtml(webview) {
         card.append(titleRow, meta);
         card.addEventListener("click", () => openSession(session.key));
         article.append(card);
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        const preview = document.createElement("button");
+        preview.textContent = "Preview & actions";
+        preview.className = "secondary";
+        preview.addEventListener("click", () => openSession(session.key, true));
+        actions.append(preview);
+        article.append(actions);
         container.append(article);
       }
     }
@@ -1757,6 +1811,11 @@ function webviewHtml(webview) {
       if (session.canContinue !== false) {
         detailActions.append(action("Copy to workspace", "copyToWorkspace", session.key, true));
       }
+      detailActions.append(
+        action("Continue as new chat", "continueAsNew", session.key),
+        action("Copy transcript path", "copyTranscriptPath", session.key, true),
+        action("Raw transcript", "openRaw", session.key, true)
+      );
 
       container.append(title, meta);
       for (const message of session.messages) {

@@ -101,6 +101,29 @@ test("labels default Stable and Insiders storage roots", () => {
   ));
 });
 
+test("allows replacing or disabling default storage roots while keeping additional roots", () => {
+  const roots = defaultStorageRoots(undefined, ["~/extra-storage"], "stable", [
+    "~/custom-storage",
+    path.join(os.homedir(), "custom-storage")
+  ]);
+  assert.deepEqual(roots.map((root) => root.path), [
+    path.join(os.homedir(), "custom-storage"),
+    path.join(os.homedir(), "extra-storage")
+  ]);
+  assert.deepEqual(defaultStorageRoots(undefined, [], "stable", []), []);
+});
+
+test("retains native product identity when an explicitly configured root is a known location", () => {
+  const currentStorage = path.join(os.homedir(), "custom-insiders", "User", "globalStorage", "viewer");
+  const workspaceStorage = path.resolve(currentStorage, "..", "..", "workspaceStorage");
+  const roots = defaultStorageRoots(currentStorage, [], "insiders", [workspaceStorage]);
+  assert.deepEqual(roots, [{
+    path: workspaceStorage,
+    id: "insiders",
+    label: "VS Code Insiders"
+  }]);
+});
+
 test("discovers workspaces without chats and lists saved workspace folders", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cross-workspace-destinations-"));
   const storage = path.join(root, "workspace-hash");

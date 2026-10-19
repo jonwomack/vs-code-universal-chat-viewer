@@ -1,8 +1,8 @@
 {
   "name": "cross-workspace-chat-viewer",
   "displayName": "Cross-Workspace Chat Viewer",
-  "description": "Search local VS Code and GitHub Copilot CLI chats across workspaces.",
-  "version": "0.4.21",
+  "description": "Search local VS Code and Copilot chat histories and continue them across workspaces.",
+  "version": "0.4.22",
   "publisher": "jonwomack",
   "license": "MIT",
   "icon": "media/marketplace-icon.png",
@@ -94,6 +94,29 @@
           },
           "default": [],
           "description": "Additional workspaceStorage folders to scan."
+        },
+        "crossWorkspaceChatViewer.storageRoots": {
+          "type": [
+            "array",
+            "null"
+          ],
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": null,
+          "description": "VS Code workspaceStorage folders to scan. Null uses automatically detected Stable, Insiders, and current-product locations; an array replaces those defaults. An empty array disables default VS Code scanning. Additional storage roots are still included. Paths may start with ~."
+        },
+        "crossWorkspaceChatViewer.copilotSessionRoots": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "default": [
+            "~/.copilot/session-state"
+          ],
+          "description": "Copilot session-state folders containing <session>/events.jsonl and optional workspace.yaml files. These histories can originate from multiple clients, not just the CLI. Replace the defaults or use an empty array to disable scanning. Paths may start with ~; other transcript formats are not supported."
         },
         "crossWorkspaceChatViewer.openWorkspaceInNewWindow": {
           "type": "boolean",

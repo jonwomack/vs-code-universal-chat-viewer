@@ -579,10 +579,10 @@ async function refreshSession(session) {
   };
 }
 
-function defaultStorageRoots(currentGlobalStoragePath, additionalRoots = [], currentProductId) {
+function defaultStorageRoots(currentGlobalStoragePath, additionalRoots = [], currentProductId, configuredRoots = null) {
   const roots = new Map();
   const addRoot = (rootPath, id, label) => {
-    const resolved = path.resolve(rootPath);
+    const resolved = path.resolve(rootPath.replace(/^~(?=$|[\\/])/, os.homedir()));
     const existing = roots.get(resolved);
     if (!existing || id === currentProductId) {
       roots.set(resolved, { path: resolved, id, label });
@@ -626,8 +626,18 @@ function defaultStorageRoots(currentGlobalStoragePath, additionalRoots = [], cur
     );
   }
 
+  if (configuredRoots !== null) {
+    const defaults = new Map(roots);
+    roots.clear();
+    for (const [index, root] of configuredRoots.entries()) {
+      const resolved = path.resolve(root.replace(/^~(?=$|[\\/])/, home));
+      const known = defaults.get(resolved);
+      addRoot(resolved, known?.id || `custom-${index + 1}`, known?.label || "Custom storage");
+    }
+  }
+
   for (const [index, root] of additionalRoots.entries()) {
-    addRoot(root.replace(/^~/, home), `custom-${index + 1}`, "Custom storage");
+    addRoot(root, `custom-${index + 1}`, "Custom storage");
   }
   return [...roots.values()];
 }

@@ -2,7 +2,27 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
-## Unreleased
+## 0.4.22 - 2026-10-19
+
+### Added
+
+- **Continue as new chat** attaches a fresh readable transcript snapshot to a
+  new, unsent VS Code chat for either supported history format, including chats
+  with unavailable original workspaces.
+- **Copy transcript path** and **Raw transcript** actions for every chat.
+- **Preview & actions** access without changing automatic native reopening.
+- Editable VS Code and Copilot session-state scan roots, with automatic refresh
+  when their settings change.
+
+### Fixed
+
+- Mixed-content Copilot assistant events now process both narration and tool
+  requests, so the latest chat rename is honored without changing response
+  fallback behavior. Older viewer caches are rebuilt even when histories have
+  not changed.
+- Copilot event histories are no longer labeled CLI-only based on their storage
+  directory. Their neutral source label does not imply which client created them.
+- Cached viewer state is invalidated for the new source labeling and scan roots.
 
 ### Removed
 

@@ -103,31 +103,27 @@ async function parseCopilotCliSession(sessionDirectory, stats) {
       });
     } else if (
       event.type === "assistant.message"
-      && typeof event.data?.content === "string"
-      && event.data.content.trim()
       && messages.length > 0
     ) {
       const message = messages.at(-1);
-      message.response = [message.response, event.data.content]
-        .filter(Boolean)
-        .join("\n\n");
-    } else if (
-      event.type === "assistant.message"
-      && Array.isArray(event.data?.toolRequests)
-      && messages.length > 0
-    ) {
-      const message = messages.at(-1);
-      for (const toolRequest of event.data.toolRequests) {
-        const summary = toolRequest?.arguments?.summary;
-        if (typeof summary === "string" && summary.trim()) {
-          message.fallbackResponseParts.push(summary);
-        }
-        if (
-          toolRequest?.name === "rename_chat"
-          && typeof toolRequest?.arguments?.title === "string"
-          && toolRequest.arguments.title.trim()
-        ) {
-          latestRenameTitle = toolRequest.arguments.title.trim();
+      if (typeof event.data?.content === "string" && event.data.content.trim()) {
+        message.response = [message.response, event.data.content]
+          .filter(Boolean)
+          .join("\n\n");
+      }
+      if (Array.isArray(event.data?.toolRequests)) {
+        for (const toolRequest of event.data.toolRequests) {
+          const summary = toolRequest?.arguments?.summary;
+          if (typeof summary === "string" && summary.trim()) {
+            message.fallbackResponseParts.push(summary);
+          }
+          if (
+            toolRequest?.name === "rename_chat"
+            && typeof toolRequest?.arguments?.title === "string"
+            && toolRequest.arguments.title.trim()
+          ) {
+            latestRenameTitle = toolRequest.arguments.title.trim();
+          }
         }
       }
     } else if (
@@ -184,7 +180,7 @@ async function parseCopilotCliSession(sessionDirectory, stats) {
     }] : [],
     workspaceExists,
     sourceProduct: "copilot-cli",
-    sourceLabel: "GitHub Copilot CLI",
+    sourceLabel: "Copilot session history",
     sourceKind: "copilot-cli",
     canContinue: false,
     storageDirectory: sessionDirectory,
@@ -197,7 +193,7 @@ async function parseCopilotCliSession(sessionDirectory, stats) {
     searchableText: [
       title,
       workspaceName,
-      "GitHub Copilot CLI",
+      "Copilot session history",
       ...messages.flatMap((message) => [message.prompt, message.response])
     ].filter(Boolean).join("\n").toLowerCase(),
     messages

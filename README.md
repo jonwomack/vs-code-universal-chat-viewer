@@ -2,17 +2,21 @@
 
 Find and continue local VS Code chat sessions without remembering which workspace contained them.
 
-Cross-Workspace Chat Viewer provides one searchable sidebar for chats stored by VS Code, VS Code Insiders, and GitHub Copilot CLI. Search across workspace names, titles, prompts, and responses, preview transcripts, or reopen an existing chat in its original workspace.
+Cross-Workspace Chat Viewer provides one searchable sidebar for chats stored by VS Code, VS Code Insiders, and Copilot clients using local session-state history. Search across workspace names, titles, prompts, and responses, preview transcripts, or reopen an existing chat in its original workspace.
 
 Marketplace identifier: `jonwomack.cross-workspace-chat-viewer`
 
 ## Features
 
 - Search chats from every local workspace in one view.
-- Search and preview local GitHub Copilot CLI sessions stored under
-  `~/.copilot/session-state`.
+- Search and preview Copilot event histories stored under
+  `~/.copilot/session-state`, without assuming which client created them.
+- Configure the scan locations for both supported storage formats.
 - Read complete transcripts without switching workspaces.
 - Continue sessions in a pinned native VS Code chat editor.
+- Continue any readable chat as a new VS Code chat with a Markdown transcript
+  attached, even if its original workspace or client is unavailable.
+- Copy the original transcript's full path for manual use.
 - Distinguish VS Code Stable and VS Code Insiders history.
 - Launch the correct VS Code product for cross-product sessions.
 - Keep orphaned or missing-workspace chats visible and readable.
@@ -37,10 +41,21 @@ Marketplace identifier: `jonwomack.cross-workspace-chat-viewer`
 3. Select a result to preview its transcript.
 4. Select **Continue chat** to open its original workspace and restore the native session.
 
-GitHub Copilot CLI sessions are labeled separately and always open as a
-read-only transcript preview. The extension does not offer VS Code-specific
-continue, import, copy, recovery, or workspace-optimization actions for CLI
-sessions.
+Copilot event histories are labeled **Copilot session history**, not CLI-only:
+their storage location does not reliably identify the client that created them.
+They open as a read-only transcript preview and support **Continue as new chat**,
+**Copy transcript path**, and **Raw transcript**. Native import, workspace-copy,
+recovery, and optimization require VS Code's native transcript format.
+
+Every result has a **Preview & actions** button, including when automatic native
+reopening is enabled and chat previews are otherwise disabled. In that preview,
+**Continue as new chat** writes a readable snapshot of the stored user/assistant
+turns to extension global storage and attaches it to a fresh chat in the current
+window and workspace. It leaves an unsent draft for you to add your next request;
+it does not reconstruct tool state or replace the original conversation.
+The transcript is reread from disk, rather than copied from a potentially stale
+preview. Snapshots remain available locally so attached files survive reloads.
+**Copy transcript path** copies the absolute path of the original JSON/JSONL file.
 
 For chats created by another VS Code product, install Cross-Workspace Chat Viewer in both Stable and Insiders. The extension launches the originating product and completes the handoff there.
 If that product has been removed but its storage remains, use **Import into
@@ -67,9 +82,8 @@ directories, edits, attachments, references, and tool paths. After confirmation
 it creates an extension-managed recovered workspace and moves the chat there.
 It never recreates missing project contents or empty placeholder directories.
 
-The extension only browses and reopens existing chats. Start new chats and
-write prompts in VS Code's native chat interface; the viewer does not compose,
-route, or pre-fill prompts.
+Write and submit requests in VS Code's native chat interface. The viewer does
+not automatically send prompts or route requests to existing chats.
 
 Chat sessions and aggregate statistics are loaded once per extension session.
 Collapsing and reopening the view restores that in-memory data rather than
@@ -100,12 +114,20 @@ the workbench reload and then continues the pending native chat.
 
 | Setting | Default | Purpose |
 |---|---:|---|
+| `crossWorkspaceChatViewer.storageRoots` | `null` | Auto-detect VS Code storage locations, or replace them with an explicit array of `workspaceStorage` paths. `[]` disables the default roots. |
 | `crossWorkspaceChatViewer.additionalStorageRoots` | `[]` | Additional `workspaceStorage` folders to scan. |
+| `crossWorkspaceChatViewer.copilotSessionRoots` | `["~/.copilot/session-state"]` | Editable Copilot session-state roots; `[]` disables event-history scanning. |
 | `crossWorkspaceChatViewer.openWorkspaceInNewWindow` | `false` | Open same-product workspaces in a new window before continuing instead of replacing the current workspace. |
 | `crossWorkspaceChatViewer.recoverMissingWorkspaces` | `true` | Offer a reviewed recovered workspace when a chat's original workspace is missing. |
 | `crossWorkspaceChatViewer.openNewWindowWhenChatActive` | `true` | Preserve an active current-workspace chat by opening the destination separately. |
 | `crossWorkspaceChatViewer.displayChatPreview` | `false` | Display a selected transcript inside the extension. |
 | `crossWorkspaceChatViewer.autoOpenChatOnSelect` | `true` | Continue the native chat immediately when its list item is selected. |
+
+Storage-root changes automatically refresh the viewer. Paths can start with `~`.
+VS Code roots must contain `<workspace>/chatSessions/*.json` or `*.jsonl`;
+Copilot roots must contain `<session>/events.jsonl` with optional `workspace.yaml`
+metadata. Changing locations does not add support for arbitrary clients' formats.
+The two root lists select parsers by storage format, not the originating UI.
 
 ## Privacy
 
@@ -120,13 +142,19 @@ make network requests. See
 - Cross-product continuation requires the extension to be installed in both VS Code Stable and VS Code Insiders.
 - Importing requires the original workspace to still exist. A chat with a
   deleted workspace remains readable and can be opened as a raw transcript.
-- Chats whose original workspace has been deleted can be viewed but cannot be continued in place.
+- Chats whose original workspace has been deleted cannot be continued in place;
+  use **Continue as new chat** to use their transcript in the current workspace.
 - The extension searches local desktop storage and does not index remote-machine chat storage.
 - Historical file references inside a copied chat still point to their original
   locations; new requests use the destination workspace.
 - Focused-workspace suggestions use recorded chat metadata. A root with no
   observed use may still be relevant to future work or implicit dependencies.
 - Focused workspace files are stored in the extension's local global storage.
+- Creating a new chat with an attachment relies on internal VS Code commands.
+  If those commands are unavailable, use **Copy transcript path** instead.
+- Transcript attachments contain the parsed user/assistant text, not restored
+  tool executions, edits, binary attachments, or hidden model state. VS Code and
+  the selected model may limit how much of a large attachment enters context.
 
 ## Development
 

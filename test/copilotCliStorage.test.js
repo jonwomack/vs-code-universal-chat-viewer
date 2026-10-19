@@ -6,10 +6,136 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const {
+  parseCopilotCliSession,
   scanCopilotCliSessions
 } = require("../src/copilotCliStorage");
 
-test("scans GitHub Copilot CLI sessions without indexing tool payloads", async () => {
+function rename(title, content = "", summary) {
+  return {
+    type: "assistant.message",
+    data: {
+      content,
+      toolRequests: [{ name: "rename_chat", arguments: { title, summary } }]
+    }
+  };
+}
+
+for (const fixture of [
+  {
+    name: "recognizes tool-only renames",
+    events: [rename("Renamed conversation")],
+    title: "Renamed conversation",
+    response: ""
+  },
+  {
+    name: "processes mixed-content renames without exposing fallback summaries",
+    events: [rename("Renamed conversation", "I renamed this conversation.", "Fallback summary")],
+    title: "Renamed conversation",
+    response: "I renamed this conversation."
+  },
+  {
+    name: "lets a later mixed-content rename override a tool-only rename",
+    events: [
+      rename("Earlier title"),
+      rename("Latest title", "Updated the conversation title.")
+    ],
+    title: "Latest title",
+    response: "Updated the conversation title."
+  },
+  {
+    name: "preserves rename order within and across assistant events",
+    events: [
+      rename("Earlier title", "First narration."),
+      {
+        type: "assistant.message",
+        data: {
+          content: "Second narration.",
+          toolRequests: [
+            { name: "rename_chat", arguments: { title: "Intermediate title" } },
+            { name: "rename_chat", arguments: { title: "  Latest title  " } }
+          ]
+        }
+      },
+      rename(" "),
+      rename(42),
+      {
+        type: "assistant.message",
+        data: { toolRequests: [null, { name: "other_tool", arguments: { title: "Not a rename" } }] }
+      }
+    ],
+    title: "Latest title",
+    response: "First narration.\n\nSecond narration."
+  },
+  {
+    name: "uses tool summaries for whitespace-only assistant content",
+    events: [rename("Renamed conversation", " \n ", "Fallback summary")],
+    title: "Renamed conversation",
+    response: "Fallback summary"
+  },
+  {
+    name: "prefers later narration over earlier fallback summaries",
+    events: [
+      rename("Earlier title", "", "Fallback summary"),
+      rename("Latest title", "Narrated response.")
+    ],
+    title: "Latest title",
+    response: "Narrated response."
+  },
+  {
+    name: "falls back to metadata when no rename exists",
+    events: [{ type: "assistant.message", data: { content: "Narrated response." } }],
+    title: "Original metadata title",
+    response: "Narrated response."
+  },
+  {
+    name: "falls back to the first prompt without metadata",
+    metadata: "",
+    events: [],
+    title: "Original prompt",
+    response: ""
+  },
+  {
+    name: "falls back to the default title without metadata or prompts",
+    metadata: "",
+    prompt: "",
+    events: [],
+    title: "Untitled CLI chat",
+    response: ""
+  },
+  {
+    name: "normalizes and truncates renamed titles",
+    events: [rename(`  ${"word ".repeat(30)}  `, "Narrated response.")],
+    title: `${"word ".repeat(30).trim().slice(0, 99)}...`,
+    response: "Narrated response."
+  }
+]) {
+  test(fixture.name, async (t) => {
+    const directory = fs.mkdtempSync(path.join(os.tmpdir(), "copilot-cli-title-"));
+    t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
+    fs.writeFileSync(
+      path.join(directory, "workspace.yaml"),
+      fixture.metadata ?? "name: Original metadata title\n"
+    );
+    const eventsPath = path.join(directory, "events.jsonl");
+    fs.writeFileSync(eventsPath, [
+      { type: "user.message", data: { content: fixture.prompt ?? "Original prompt" } },
+      ...fixture.events
+    ].map((event) => JSON.stringify(event)).join("\n"));
+
+    const session = await parseCopilotCliSession(directory, fs.statSync(eventsPath));
+
+    assert.equal(session.title, fixture.title);
+    assert.equal(session.messages[0].response, fixture.response);
+    assert.equal(session.responseCount, fixture.response ? 1 : 0);
+    assert.ok(session.searchableText.includes(fixture.title.toLowerCase()));
+    if (!fixture.response.includes("Fallback summary")) {
+      assert.doesNotMatch(session.searchableText, /fallback summary/i);
+    }
+    assert.equal("fallbackResponseParts" in session.messages[0], false);
+  });
+}
+
+test("labels Copilot event storage without assuming which client created it", async () => {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "copilot-cli-sessions-"));
   const sessionDirectory = path.join(root, "session-id");
   const workspace = path.join(root, "project");
@@ -58,7 +184,7 @@ test("scans GitHub Copilot CLI sessions without indexing tool payloads", async (
   assert.equal(session.id, "session-id");
   assert.equal(session.title, "Pi touchscreen research");
   assert.equal(session.workspaceName, "project");
-  assert.equal(session.sourceLabel, "GitHub Copilot CLI");
+  assert.equal(session.sourceLabel, "Copilot session history");
   assert.equal(session.sourceKind, "copilot-cli");
   assert.equal(session.canContinue, false);
   assert.equal(session.messageCount, 1);

@@ -9,16 +9,17 @@ The extension reads:
 
 - VS Code and VS Code Insiders `workspaceStorage` metadata.
 - Local chat transcript files in `chatSessions` directories.
-- GitHub Copilot CLI `workspace.yaml` metadata and user/assistant messages from
-  `~/.copilot/session-state/*/events.jsonl`.
+- Copilot `workspace.yaml` metadata and user/assistant messages from
+  `~/.copilot/session-state/*/events.jsonl`, or configured alternative roots.
 - Workspace paths associated with those transcripts.
 - Saved `.code-workspace` files, when available, to show their configured root
   folders in the destination picker.
 
 This access is required to index, display, search, and reopen local chat sessions.
-CLI event streams are read-only and are not imported, copied, moved, or opened
-as native VS Code chat sessions. Tool execution payloads in CLI event streams
-are not included in the viewer transcript or search index.
+Copilot event streams are read-only and are not imported or moved into native
+VS Code storage. **Continue as new chat** exports their readable conversation
+text rather than converting the original session format. Tool summaries/results
+are used as a fallback when a turn has no narrated assistant response.
 
 ## Data handling
 
@@ -29,6 +30,15 @@ are not included in the viewer transcript or search index.
   transcript into the current VS Code product's local `workspaceStorage`.
 - When the user explicitly selects **Copy to workspace**, the extension copies
   that transcript into the selected workspace's local `workspaceStorage`.
+- When the user explicitly selects **Continue as new chat**, the extension
+  stores a Markdown snapshot of parsed user/assistant turns, source path, and
+  workspace metadata under `continuation-transcripts` in extension global
+  storage with user-only file permissions. Snapshots persist so existing
+  attachments remain readable. It attaches the snapshot to a new native chat
+  and leaves the draft unsent. Sending that chat may share its context with the
+  selected AI provider according to VS Code's settings and policies.
+- **Copy transcript path** writes the original file's absolute path to the
+  system clipboard. It does not copy transcript contents.
 - When the user accepts an **Optimize workspace** suggestion, the extension writes a
   local `.code-workspace` file under its global storage. This file contains the
   selected folder paths and available settings from the source workspace, but
