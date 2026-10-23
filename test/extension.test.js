@@ -228,7 +228,7 @@ test("webview retains search and previews with no prompt composer", async () => 
       key: "cli",
       title: "CLI transcript",
       sourceLabel: "GitHub Copilot CLI",
-      workspaceName: "Project",
+      workspaceName: "A project with a long workspace name",
       canContinue: false,
       messageCount: 1,
       modifiedAt: Date.now(),
@@ -237,6 +237,8 @@ test("webview retains search and previews with no prompt composer", async () => 
   } });
   const search = elements.get("search");
   const container = elements.get("sessions");
+  const missingWorkspaceMetadata = "1 prompts · just now · GitHub Copilot CLI · A project with a long workspace name (missing)";
+  assert.equal(container.children[0].children[0].children[1].textContent, missingWorkspaceMetadata);
   search.value = "missing text";
   search.listeners.input();
   assert.equal(container.children[0].textContent, "No chats match this search.");
@@ -246,6 +248,7 @@ test("webview retains search and previews with no prompt composer", async () => 
   assert.equal(messages.at(-1).type, "selectSession");
   assert.equal(elements.get("detailHeader").hidden, false);
   assert.equal(container.className, "detail-view");
+  assert.equal(container.children[1].textContent, missingWorkspaceMetadata);
   assert.equal(container.children.at(-1).children[1].textContent, "Read this response");
   const actions = elements.get("detailActions").children;
   for (const label of ["Continue as new chat", "Copy transcript path", "Raw transcript"]) {
@@ -262,15 +265,19 @@ test("webview retains search and previews with no prompt composer", async () => 
     key: "native",
     title: "Native chat",
     sourceLabel: "VS Code",
+    workspaceName: "Project",
     workspaceExists: true,
     sourceProductAvailable: true,
     messageCount: 1,
     modifiedAt: Date.now(),
     messages: [{ prompt: "Search this prompt", response: "Read this response" }]
   }] } });
+  const nativeMetadata = "1 prompts · just now · VS Code · Project";
+  assert.equal(container.children[0].children[0].children[1].textContent, nativeMetadata);
   container.children[0].children[1].children[0].listeners.click();
   assert.equal(messages.at(-1).type, "previewSession");
   assert.equal(elements.get("detailHeader").hidden, false);
+  assert.equal(container.children[1].textContent, nativeMetadata);
   assert.ok(elements.get("detailActions").children.some((button) => button.textContent === "Continue chat"));
 });
 
@@ -399,6 +406,72 @@ test("scans configured roots, deduplicates paths, and includes them in cache ide
   });
   await new Promise((resolve) => setImmediate(resolve));
   assert.equal(refreshed, true);
+});
+
+test("startup sweep removes stale cache temp files but keeps fresh ones and the cache", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "viewer-temp-sweep-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const storage = path.join(root, "storage");
+  fs.mkdirSync(storage, { recursive: true });
+  const cachePath = path.join(storage, "chat-viewer-cache.json");
+  fs.writeFileSync(cachePath, "{}");
+  const stale = path.join(storage, "chat-viewer-cache.json.123.deadbeef.tmp");
+  const fresh = path.join(storage, "chat-viewer-cache.json.123.fresh.tmp");
+  const unrelated = path.join(storage, "chat-viewer-cache.json.bak");
+  fs.writeFileSync(stale, "stale");
+  fs.writeFileSync(fresh, "fresh");
+  fs.writeFileSync(unrelated, "keep");
+  const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  fs.utimesSync(stale, twoHoursAgo, twoHoursAgo);
+  fs.utimesSync(unrelated, twoHoursAgo, twoHoursAgo);
+
+  const { provider } = await activateViewer({}, { globalStoragePath: storage });
+  t.after(() => provider.dispose());
+
+  assert.equal(fs.existsSync(stale), false);
+  assert.equal(fs.existsSync(fresh), true);
+  assert.equal(fs.existsSync(unrelated), true);
+  assert.equal(fs.existsSync(cachePath), true);
+});
+
+test("concurrent persistCache calls coalesce and leave no temp files", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "viewer-persist-coalesce-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { provider } = await activateViewer({}, { globalStoragePath: path.join(root, "storage") });
+  t.after(() => provider.dispose());
+  provider.hasLoaded = true;
+  provider.sessions = [{ key: "a", title: "One" }];
+
+  await Promise.all([
+    provider.persistCache(),
+    provider.persistCache(),
+    provider.persistCache(),
+    provider.persistCache(),
+    provider.persistCache()
+  ]);
+
+  const stored = JSON.parse(fs.readFileSync(provider.cachePath, "utf8"));
+  assert.equal(stored.sessions.length, 1);
+  assert.equal(stored.sessions[0].title, "One");
+  const leftovers = fs.readdirSync(path.dirname(provider.cachePath))
+    .filter((name) => name.endsWith(".tmp"));
+  assert.deepEqual(leftovers, []);
+});
+
+test("failed persistCache rename cleans up its temp file", async (t) => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "viewer-persist-failure-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  const { provider } = await activateViewer({}, { globalStoragePath: path.join(root, "storage") });
+  t.after(() => provider.dispose());
+  provider.hasLoaded = true;
+  // Point the cache at an existing directory so the rename must fail.
+  provider.cachePath = path.join(root, "cache-as-directory");
+  fs.mkdirSync(provider.cachePath, { recursive: true });
+
+  await provider.persistCache();
+
+  const leftovers = fs.readdirSync(root).filter((name) => name.includes(".tmp"));
+  assert.deepEqual(leftovers, []);
 });
 
 for (const version of [3, 4]) {

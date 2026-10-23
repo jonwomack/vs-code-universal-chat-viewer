@@ -52,11 +52,55 @@ const PENDING_SESSION_KEY = "crossWorkspaceChatViewer.pendingSession";
 const LEGACY_PENDING_SESSION_KEY = "universalChatViewer.pendingSession";
 const PENDING_IMPORT_KEY = "crossWorkspaceChatViewer.pendingImport";
 const VIEWER_CACHE_VERSION = 5;
+// Temp files from a crashed/killed write are swept on startup once they are
+// older than this; younger files may belong to another running VS Code window.
+const STALE_TEMP_AGE_MS = 60 * 60 * 1000;
 // Keep the shared filename until both Stable and Insiders have upgraded.
 const CROSS_PRODUCT_HANDOFF = path.join(
   os.tmpdir(),
   `universal-chat-viewer-${typeof process.getuid === "function" ? process.getuid() : "user"}.json`
 );
+
+async function renameWithOverwrite(source, destination) {
+  try {
+    await fs.promises.rename(source, destination);
+  } catch (error) {
+    // Windows rename() refuses to overwrite an existing (or briefly locked)
+    // destination, unlike POSIX. Remove the destination and retry once.
+    if (!["EPERM", "EEXIST", "EACCES", "EBUSY"].includes(error.code)) {
+      throw error;
+    }
+    await fs.promises.rm(destination, { force: true });
+    await fs.promises.rename(source, destination);
+  }
+}
+
+async function sweepStaleTempFilesIn(directory, isTempName, now) {
+  let entries;
+  try {
+    entries = await fs.promises.readdir(directory);
+  } catch {
+    return 0;
+  }
+  let removed = 0;
+  for (const entry of entries) {
+    if (!isTempName(entry)) {
+      continue;
+    }
+    const filePath = path.join(directory, entry);
+    try {
+      const stats = await fs.promises.stat(filePath);
+      if (!stats.isFile() || now - stats.mtimeMs < STALE_TEMP_AGE_MS) {
+        continue;
+      }
+      await fs.promises.rm(filePath, { force: true });
+      removed += 1;
+    } catch {
+      // Another window may have removed or replaced it; not an error.
+    }
+  }
+  return removed;
+}
 
 class ChatViewerProvider {
   constructor(context, output) {
@@ -76,6 +120,8 @@ class ChatViewerProvider {
     this.newSessionTimer = undefined;
     this.pendingNewFiles = new Set();
     this.cacheLoadPromise = undefined;
+    this.cachePersistPromise = undefined;
+    this.cachePersistPending = false;
     context.subscriptions.push(vscode.workspace.onDidChangeConfiguration((event) => {
       if (
         event.affectsConfiguration(`${CONFIGURATION_SECTION}.displayChatPreview`)
@@ -371,13 +417,35 @@ class ChatViewerProvider {
     );
   }
 
-  async persistCache() {
+  // Serializes cache writes: callers that arrive while a write is in flight
+  // coalesce into a single follow-up write of the latest state instead of
+  // each writing a full copy of the cache to its own temp file.
+  persistCache() {
     if (!this.hasLoaded) {
-      return;
+      return Promise.resolve();
     }
+    if (this.cachePersistPromise) {
+      this.cachePersistPending = true;
+      return this.cachePersistPromise;
+    }
+    this.cachePersistPromise = (async () => {
+      try {
+        do {
+          this.cachePersistPending = false;
+          await this.writeCacheToDisk();
+        } while (this.cachePersistPending);
+      } finally {
+        this.cachePersistPromise = undefined;
+      }
+    })();
+    return this.cachePersistPromise;
+  }
+
+  async writeCacheToDisk() {
+    let temporaryPath;
     try {
       await fs.promises.mkdir(path.dirname(this.cachePath), { recursive: true });
-      const temporaryPath = `${this.cachePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
+      temporaryPath = `${this.cachePath}.${process.pid}.${crypto.randomUUID()}.tmp`;
       await fs.promises.writeFile(
         temporaryPath,
         JSON.stringify({
@@ -395,10 +463,42 @@ class ChatViewerProvider {
         }),
         { encoding: "utf8", mode: 0o600 }
       );
-      await fs.promises.rename(temporaryPath, this.cachePath);
+      await renameWithOverwrite(temporaryPath, this.cachePath);
+      temporaryPath = undefined;
     } catch (error) {
       this.output.appendLine(`Unable to persist viewer cache: ${error.message}`);
+    } finally {
+      if (temporaryPath) {
+        // Never leave a full copy of the cache behind as an orphaned temp
+        // file when a write or rename fails or the host is killed mid-write
+        // (a startup sweep handles the killed case).
+        await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
+      }
     }
+  }
+
+  // Removes temp files orphaned by crashed/killed cache and handoff writes.
+  // Only files older than STALE_TEMP_AGE_MS are touched, so temp files from
+  // another VS Code window that is still running are left alone.
+  async sweepStaleTempFiles() {
+    const now = Date.now();
+    const cacheBase = path.basename(this.cachePath);
+    const handoffBase = path.basename(CROSS_PRODUCT_HANDOFF);
+    let removed = 0;
+    removed += await sweepStaleTempFilesIn(
+      path.dirname(this.cachePath),
+      (name) => name.startsWith(`${cacheBase}.`) && name.endsWith(".tmp"),
+      now
+    );
+    removed += await sweepStaleTempFilesIn(
+      os.tmpdir(),
+      (name) => name.startsWith(`${handoffBase}.`),
+      now
+    );
+    if (removed) {
+      this.output.appendLine(`Removed ${removed} stale viewer temp file${removed === 1 ? "" : "s"}.`);
+    }
+    return removed;
   }
 
   async reconcileCache() {
@@ -1395,13 +1495,21 @@ async function writeCrossProductHandoffs(items) {
     return;
   }
 
-  const temporaryPath = `${CROSS_PRODUCT_HANDOFF}.${process.pid}.${crypto.randomUUID()}`;
-  await fs.promises.writeFile(
-    temporaryPath,
-    JSON.stringify(unique),
-    { encoding: "utf8", mode: 0o600 }
-  );
-  await fs.promises.rename(temporaryPath, CROSS_PRODUCT_HANDOFF);
+  let temporaryPath;
+  try {
+    temporaryPath = `${CROSS_PRODUCT_HANDOFF}.${process.pid}.${crypto.randomUUID()}`;
+    await fs.promises.writeFile(
+      temporaryPath,
+      JSON.stringify(unique),
+      { encoding: "utf8", mode: 0o600 }
+    );
+    await renameWithOverwrite(temporaryPath, CROSS_PRODUCT_HANDOFF);
+    temporaryPath = undefined;
+  } finally {
+    if (temporaryPath) {
+      await fs.promises.rm(temporaryPath, { force: true }).catch(() => {});
+    }
+  }
 }
 
 function isFreshHandoff(item) {
@@ -1745,7 +1853,7 @@ function webviewHtml(webview) {
         const meta = document.createElement("div");
         meta.className = "meta";
         const workspaceStatus = session.workspaceExists ? session.workspaceName : session.workspaceName + " (missing)";
-        meta.textContent = workspaceStatus + " · " + session.sourceLabel + " · " + session.messageCount + " prompts · " + formatRelativeTime(session.modifiedAt);
+        meta.textContent = session.messageCount + " prompts · " + formatRelativeTime(session.modifiedAt) + " · " + session.sourceLabel + " · " + workspaceStatus;
         meta.title = formatDate(session.modifiedAt);
         card.append(titleRow, meta);
         card.addEventListener("click", () => openSession(session.key));
@@ -1773,7 +1881,7 @@ function webviewHtml(webview) {
       const meta = document.createElement("div");
       meta.className = "detail-meta";
       const workspaceStatus = session.workspaceExists ? session.workspaceName : session.workspaceName + " (missing)";
-      meta.textContent = workspaceStatus + " · " + session.sourceLabel + " · " + session.messageCount + " prompts · " + formatRelativeTime(session.modifiedAt);
+      meta.textContent = session.messageCount + " prompts · " + formatRelativeTime(session.modifiedAt) + " · " + session.sourceLabel + " · " + workspaceStatus;
       meta.title = formatDate(session.modifiedAt);
 
       detailActions.replaceChildren();
@@ -1955,6 +2063,9 @@ async function activate(context) {
   }
 
   const provider = new ChatViewerProvider(context, output);
+  await provider.sweepStaleTempFiles().catch((error) => {
+    output.appendLine(`Unable to sweep stale viewer temp files: ${error.stack || error.message}`);
+  });
   context.subscriptions.push(
     output,
     provider,

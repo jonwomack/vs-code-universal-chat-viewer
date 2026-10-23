@@ -2,6 +2,20 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## 0.4.23 - 2026-10-23
+
+### Fixed
+
+- Cache writes no longer leak temp files: persistCache writes are serialized
+  and coalesced, failed writes clean up their temp file (including the
+  Windows rename-over-existing case), and stale cache/handoff temp files
+  older than an hour are swept on startup.
+
+### Changed
+
+- Chat metadata now shows prompt count, relative time, client, and workspace
+  name in that order, keeping variable-length workspace names last.
+
 ## 0.4.22 - 2026-10-19
 
 ### Added
