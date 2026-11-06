@@ -534,3 +534,94 @@ for (const version of [3, 4]) {
     assert.equal(reloaded.provider.sessions[0].title, "Renamed conversation");
   });
 }
+
+test("view state persists the search query in global state", async () => {
+  const pending = {};
+  const { provider } = await activateViewer(pending);
+  await provider.handleMessage({ type: "saveViewState", query: "plankton", showEmpty: true });
+  assert.equal(pending["crossWorkspaceChatViewer.viewState"].query, "plankton");
+  assert.equal(pending["crossWorkspaceChatViewer.viewState"].showEmpty, true);
+  assert.equal(provider.getViewState().query, "plankton");
+  assert.equal(provider.getViewState().showEmpty, true);
+  await provider.handleMessage({ type: "saveViewState", query: "", showEmpty: false });
+  assert.equal(pending["crossWorkspaceChatViewer.viewState"], undefined);
+  assert.equal(provider.getViewState().query, "");
+  assert.equal(provider.getViewState().showEmpty, false);
+});
+
+test("webview restores and saves the search query", async () => {
+  const { provider } = await activateViewer();
+  const webview = {
+    cspSource: "vscode-webview:",
+    onDidReceiveMessage() {}
+  };
+  provider.resolveWebviewView({ webview });
+
+  function element() {
+    return {
+      value: "",
+      checked: false,
+      scrollTop: 0,
+      children: [],
+      listeners: {},
+      append(...children) { this.children.push(...children); },
+      replaceChildren(...children) { this.children = children; },
+      addEventListener(name, callback) { this.listeners[name] = callback; },
+      querySelector() { return undefined; },
+      scrollIntoView() {}
+    };
+  }
+  const elements = new Map(
+    ["search", "showEmpty", "sessions", "summary", "listHeader",
+      "detailHeader", "detailActions", "back"].map((id) => [id, element()])
+  );
+  const messages = [];
+  let storedState = { query: "saved query", showEmpty: true };
+  let onMessage;
+  const script = webview.html.match(/<script nonce="[^"]+">([\s\S]*?)<\/script>/)[1];
+  vm.runInNewContext(script, {
+    acquireVsCodeApi: () => ({
+      postMessage: (message) => messages.push(message),
+      getState: () => storedState,
+      setState: (state) => { storedState = state; }
+    }),
+    document: {
+      getElementById: (id) => {
+        assert.ok(elements.has(id), `Unexpected UI element: ${id}`);
+        return elements.get(id);
+      },
+      createElement: element,
+      addEventListener() {}
+    },
+    window: { addEventListener: (_, callback) => { onMessage = callback; } },
+    requestAnimationFrame: (callback) => callback(),
+    setTimeout: (callback) => callback()
+  });
+  const search = elements.get("search");
+  const showEmpty = elements.get("showEmpty");
+  assert.equal(messages[0].type, "ready");
+  assert.equal(search.value, "saved query");
+  assert.equal(showEmpty.checked, true);
+
+  // The host copy (which survives restarts) applies when the user has
+  // not already typed in this freshly created webview.
+  onMessage({ data: { type: "viewState", query: "host query", showEmpty: false } });
+  assert.equal(search.value, "host query");
+  assert.equal(showEmpty.checked, false);
+  assert.equal(storedState.query, "host query");
+  assert.equal(storedState.showEmpty, false);
+
+  // Typing updates both the webview state and the host-persisted copy.
+  search.value = "typed query";
+  search.listeners.input();
+  assert.equal(storedState.query, "typed query");
+  assert.equal(storedState.showEmpty, false);
+  assert.equal(messages.at(-1).type, "saveViewState");
+  assert.equal(messages.at(-1).query, "typed query");
+  assert.equal(messages.at(-1).showEmpty, false);
+
+  // Once the user has typed, a late host state must not overwrite it.
+  onMessage({ data: { type: "viewState", query: "stale query", showEmpty: true } });
+  assert.equal(search.value, "typed query");
+  assert.equal(showEmpty.checked, false);
+});

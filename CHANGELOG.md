@@ -2,6 +2,16 @@
 
 All notable changes to Cross-Workspace Chat Viewer are documented here.
 
+## 0.4.24 - 2026-11-06
+
+### Added
+
+- The search query and the "Show empty chats" toggle now survive closing
+  and reopening the viewer, reloading the window, and restarting VS Code.
+  The webview keeps its own copy for instant restore and the extension
+  host persists the latest state in global storage; clearing the search
+  clears the saved query.
+
 ## 0.4.23 - 2026-10-23
 
 ### Fixed

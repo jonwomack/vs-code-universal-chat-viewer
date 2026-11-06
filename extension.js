@@ -51,6 +51,7 @@ const LEGACY_CONFIGURATION_SECTION = "universalChatViewer";
 const PENDING_SESSION_KEY = "crossWorkspaceChatViewer.pendingSession";
 const LEGACY_PENDING_SESSION_KEY = "universalChatViewer.pendingSession";
 const PENDING_IMPORT_KEY = "crossWorkspaceChatViewer.pendingImport";
+const VIEW_STATE_KEY = "crossWorkspaceChatViewer.viewState";
 const VIEWER_CACHE_VERSION = 5;
 // Temp files from a crashed/killed write are swept on startup once they are
 // older than this; younger files may belong to another running VS Code window.
@@ -151,6 +152,7 @@ class ChatViewerProvider {
   async handleMessage(message) {
     if (message.type === "ready") {
       this.postPreferences();
+      this.postViewState();
       await this.loadCache();
       if (this.hasLoaded) {
         await this.postCachedSessions();
@@ -165,6 +167,10 @@ class ChatViewerProvider {
     }
     if (message.type === "refresh") {
       await this.refresh();
+      return;
+    }
+    if (message.type === "saveViewState") {
+      await this.saveViewState(message);
       return;
     }
 
@@ -333,6 +339,27 @@ class ChatViewerProvider {
       type: "preferences",
       displayChatPreview: configuration.get("displayChatPreview", false)
     });
+  }
+
+  getViewState() {
+    const stored = this.context.globalState.get(VIEW_STATE_KEY);
+    return {
+      query: typeof stored?.query === "string" ? stored.query : "",
+      showEmpty: stored?.showEmpty === true
+    };
+  }
+
+  postViewState() {
+    this.view?.webview.postMessage({ type: "viewState", ...this.getViewState() });
+  }
+
+  async saveViewState(message) {
+    const query = typeof message.query === "string" ? message.query.slice(0, 1000) : "";
+    const showEmpty = message.showEmpty === true;
+    await this.context.globalState.update(
+      VIEW_STATE_KEY,
+      query || showEmpty ? { query, showEmpty } : undefined
+    );
   }
 
   shouldProtectActiveChat(destination) {
@@ -1620,6 +1647,33 @@ function webviewHtml(webview) {
     const vscode = acquireVsCodeApi();
     const search = document.getElementById("search");
     const showEmpty = document.getElementById("showEmpty");
+    let viewStateDirty = false;
+    let persistSequence = 0;
+    try {
+      const savedViewState = vscode.getState() || {};
+      if (typeof savedViewState.query === "string") {
+        search.value = savedViewState.query;
+      }
+      showEmpty.checked = savedViewState.showEmpty === true;
+    } catch {
+      // Hosts without webview state keep the empty defaults; the
+      // extension host still restores its persisted copy below.
+    }
+
+    function persistViewState() {
+      const viewState = { query: search.value, showEmpty: showEmpty.checked };
+      try {
+        vscode.setState(viewState);
+      } catch {
+        // The host copy posted below still preserves the state.
+      }
+      const sequence = ++persistSequence;
+      setTimeout(() => {
+        if (sequence === persistSequence) {
+          vscode.postMessage({ type: "saveViewState", ...viewState });
+        }
+      }, 250);
+    }
     const container = document.getElementById("sessions");
     const summary = document.getElementById("summary");
     const listHeader = document.getElementById("listHeader");
@@ -1941,8 +1995,16 @@ function webviewHtml(webview) {
       }
     });
 
-    search.addEventListener("input", render);
-    showEmpty.addEventListener("change", render);
+    search.addEventListener("input", () => {
+      viewStateDirty = true;
+      persistViewState();
+      render();
+    });
+    showEmpty.addEventListener("change", () => {
+      viewStateDirty = true;
+      persistViewState();
+      render();
+    });
     container.addEventListener("mouseenter", () => {
       pointerInsideList = true;
     });
@@ -2003,6 +2065,17 @@ function webviewHtml(webview) {
         listHeader.hidden = false;
         detailHeader.hidden = true;
         summary.textContent = "Unable to scan chats: " + event.data.message;
+      } else if (event.data.type === "viewState") {
+        if (!viewStateDirty) {
+          if (typeof event.data.query === "string") {
+            search.value = event.data.query;
+          }
+          showEmpty.checked = event.data.showEmpty === true;
+          try {
+            vscode.setState({ query: search.value, showEmpty: showEmpty.checked });
+          } catch {}
+          render();
+        }
       } else if (event.data.type === "preferences") {
         displayChatPreview = event.data.displayChatPreview;
         if (!displayChatPreview && openSessionKey) {

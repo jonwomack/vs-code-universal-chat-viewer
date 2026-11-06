@@ -2,7 +2,7 @@
   "name": "cross-workspace-chat-viewer",
   "displayName": "Cross-Workspace Chat Viewer",
   "description": "Search local VS Code and Copilot chat histories and continue them across workspaces.",
-  "version": "0.4.23",
+  "version": "0.4.24",
   "publisher": "jonwomack",
   "license": "MIT",
   "icon": "media/marketplace-icon.png",
